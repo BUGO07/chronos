@@ -19,5 +19,5 @@ x86 = "0.52.0"
 x86_64 = "0.15.2"
 
 [features]
-default = ["tests"]
+default = []
 tests = []
