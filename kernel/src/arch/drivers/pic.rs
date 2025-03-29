@@ -1,97 +1,64 @@
-use core::cell::SyncUnsafeCell;
-
 use x86_64::instructions::port::Port;
 
-static MASTER: SyncUnsafeCell<Pic> = SyncUnsafeCell::new(Pic::new(0x20));
-static SLAVE: SyncUnsafeCell<Pic> = SyncUnsafeCell::new(Pic::new(0xA0));
+use crate::info;
 
-// SAFETY: must be main thread
-pub unsafe fn master<'a>() -> &'a mut Pic {
-    &mut *MASTER.get()
-}
-// SAFETY: must be main thread
-pub unsafe fn slave<'a>() -> &'a mut Pic {
-    &mut *SLAVE.get()
-}
+const ICW1_ICW4: u8 = 0x01;
+const ICW4_8086: u8 = 0x01;
+const ICW1_INIT: u8 = 0x10;
 
-pub unsafe fn init() {
-    let master = master();
-    let slave = slave();
-    // Start initialization
-    master.cmd.write(0x11);
-    slave.cmd.write(0x11);
-
-    // Set offsets
-    master.data.write(0x20);
-    slave.data.write(0x28);
-
-    // Set up cascade
-    master.data.write(4);
-    slave.data.write(2);
-
-    // Set up interrupt mode (1 is 8086/88 mode, 2 is auto EOI)
-    master.data.write(1);
-    slave.data.write(1);
-
-    // Unmask interrupts
-    master.data.write(0);
-    slave.data.write(0);
-
-    // Ack remaining interrupts
-    master.ack();
-    slave.ack();
-
-    // probably already set to PIC, but double-check
-    // irq::set_irq_method(irq::IrqMethod::Pic);
-}
-
-pub unsafe fn disable() {
-    master().data.write(0xFF);
-    slave().data.write(0xFF);
-}
-
-pub struct Pic {
-    cmd: Port<u8>,
-    data: Port<u8>,
-}
-
-impl Pic {
-    pub const fn new(port: u16) -> Pic {
-        Pic {
-            cmd: Port::new(port),
-            data: Port::new(port + 1),
-        }
+pub fn send_eoi() {
+    unsafe {
+        Port::new(0xA0).write(0x20u8);
+        Port::new(0x20).write(0x20u8);
     }
+    // MASTER.lock().send_eoi();
+}
 
-    pub unsafe fn ack(&mut self) {
-        self.cmd.write(0x20);
-    }
-
-    pub unsafe fn mask_set(&mut self, irq: u8) {
-        assert!(irq < 8);
-
-        let mut mask = self.data.read();
-        mask |= 1 << irq;
-        self.data.write(mask);
-    }
-
-    pub unsafe fn mask_clear(&mut self, irq: u8) {
-        assert!(irq < 8);
-
-        let mut mask = self.data.read();
-        mask &= !(1 << irq);
-        self.data.write(mask);
-    }
-    /// A bitmap of all currently servicing IRQs. Spurious IRQs will not have this bit set
-    pub unsafe fn isr(&mut self) -> u8 {
-        self.cmd.write(0x0A);
-        self.cmd.read() // note that cmd is read, rather than data
+pub fn unmask() {
+    info!("unmasking all irqs");
+    unsafe {
+        Port::new(0x21).write(0u8);
+        Port::new(0xA1).write(0u8);
     }
 }
 
-pub unsafe fn send_eoi(irq: u8) {
-    if irq >= 8 {
-        slave().cmd.write(0x20);
+pub fn disable() {
+    info!("masking all irqs");
+    unsafe {
+        Port::new(0x21).write(0xffu8);
+        Port::new(0xA1).write(0xffu8);
     }
-    master().cmd.write(0x20);
+}
+
+pub fn init() {
+    info!("remapping");
+
+    let mut master_command: Port<u8> = Port::new(0x20);
+    let mut master_data: Port<u8> = Port::new(0x21);
+    let mut slave_command: Port<u8> = Port::new(0xA0);
+    let mut slave_data: Port<u8> = Port::new(0xA1);
+
+    unsafe {
+        let i1 = master_data.read();
+        let i2 = slave_data.read();
+
+        master_command.write(ICW1_INIT | ICW1_ICW4);
+        slave_command.write(ICW1_INIT | ICW1_ICW4);
+
+        master_data.write(0x20);
+        slave_data.write(0x28);
+
+        master_data.write(0x04);
+        slave_data.write(0x02);
+
+        master_data.write(ICW4_8086);
+        slave_data.write(ICW4_8086);
+
+        master_data.write(i1);
+        slave_data.write(i2);
+    }
+
+    // limine masks all irqs by default
+    unmask();
+    x86_64::instructions::interrupts::enable();
 }

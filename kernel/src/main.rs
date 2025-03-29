@@ -8,7 +8,6 @@
     clippy::zero_ptr
 )]
 
-// pub mod keyboard;
 pub mod arch;
 pub mod memory;
 pub mod utils;
@@ -20,8 +19,8 @@ extern crate alloc;
 
 use core::panic::PanicInfo;
 use limine::BaseRevision;
-use limine::request::{HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker};
-use x86_64::VirtAddr;
+use limine::request::{RequestsEndMarker, RequestsStartMarker};
+use utils::halt_loop;
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -34,58 +33,23 @@ static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 #[used]
 #[unsafe(link_section = ".requests_end_marker")]
 static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
-
-#[unsafe(link_section = ".requests")]
-static MEMMAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
-
-#[unsafe(link_section = ".requests")]
-static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
-
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
     assert!(BASE_REVISION.is_supported());
 
-    // println!("\n-----------------------------------\n");
-    info!("Starting kernel...\n");
-    // println!("\n-----------------------------------\n");
+    info!("starting kernel...\n");
 
-    info!("Initializing GDT and TSS...");
     arch::gdt::init();
-    info!("Initialized GDT and TSS.");
-
-    println!();
-    info!("Setting up interrupts...\n");
-
-    info!("Initializing IDT...");
     arch::interrupts::init_idt();
-    info!("Initialized IDT.\n");
-
-    info!("Initializing PIC driver...");
-    unsafe { arch::drivers::pic::init() };
-    info!("Initialized PIC driver.\n");
-
-    info!("Enabling interrupts... (`sti` instruction)\n");
-    x86_64::instructions::interrupts::enable();
-
-    info!("Interrupts are set up.\n");
-
-    info!("Initializing memory...");
-    let hhdm_offset = HHDM_REQUEST.get_response().unwrap().offset();
-    let entries = MEMMAP_REQUEST.get_response().unwrap().entries();
-    let phys_mem_offset = VirtAddr::new(hhdm_offset);
-    let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    let mut frame_allocator = unsafe { memory::BootInfoFrameAllocator::init(entries) };
-
-    memory::allocator::init_heap(&mut mapper, &mut frame_allocator)
-        .expect("heap initialization failed");
-    info!("Memory initialized.");
+    arch::drivers::pic::init();
+    memory::init();
 
     #[cfg(feature = "tests")]
     tests::init();
 
     println!("\n--------------------------------------\n");
 
-    info!("Up and running!");
+    info!("up and running");
 
     halt_loop()
 }
@@ -95,21 +59,13 @@ fn panic(info: &PanicInfo) -> ! {
     #[cfg(feature = "tests")]
     {
         println!("[failed]\n");
-        error!("{}\n", info);
+        println!("{}\n", info);
         utils::exit_qemu(utils::QemuExitCode::Failed);
     }
     #[cfg(not(feature = "tests"))]
     {
         error!("Kernel panic: {}", info);
     }
-    loop {
-        x86_64::instructions::interrupts::disable();
-        x86_64::instructions::hlt();
-    }
-}
-
-pub fn halt_loop() -> ! {
-    loop {
-        x86_64::instructions::hlt();
-    }
+    x86_64::instructions::interrupts::disable();
+    halt_loop()
 }

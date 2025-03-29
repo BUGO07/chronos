@@ -1,7 +1,8 @@
 # Rust Kernel V2
 
 A basic x86_64 os kernel made in rust (rewrite of rusty_os)\
-Contributors are welcome
+Contributors are welcome\
+:warning: This project is a mess, and will probably be so for a long time. 
 
 ## [LICENSE](LICENSE)
 
@@ -9,6 +10,10 @@ Contributors are welcome
 
 - Basic Logger
 - Serial
+- Interrupts
+- Memory Management
+- PS/2 Keyboard
+- Time
 
 ## Building And Running
 
