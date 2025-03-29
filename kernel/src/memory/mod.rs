@@ -1,4 +1,7 @@
-use limine::memory_map::{Entry, EntryType};
+use limine::{
+    memory_map::{Entry, EntryType},
+    request::{HhdmRequest, MemoryMapRequest},
+};
 use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::Cr3,
@@ -7,7 +10,15 @@ use x86_64::{
     },
 };
 
+use crate::info;
+
 pub mod allocator;
+
+#[unsafe(link_section = ".requests")]
+static MEMMAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
+
+#[unsafe(link_section = ".requests")]
+static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 
 pub struct EmptyFrameAllocator;
 
@@ -40,9 +51,20 @@ impl BootInfoFrameAllocator {
     }
 }
 
-pub unsafe fn init(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
+pub fn init() {
+    info!("requesting hhdm and memmap");
+    let hhdm_offset = HHDM_REQUEST.get_response().unwrap().offset();
+    let entries = MEMMAP_REQUEST.get_response().unwrap().entries();
+
+    info!("mapping physical to virtual memory");
+    let physical_memory_offset = VirtAddr::new(hhdm_offset);
+
     let level_4_table = unsafe { active_level_4_table(physical_memory_offset) };
-    unsafe { OffsetPageTable::new(level_4_table, physical_memory_offset) }
+    let mut mapper = unsafe { OffsetPageTable::new(level_4_table, physical_memory_offset) };
+    info!("initializing frame allocator");
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(entries) };
+
+    allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 }
 
 unsafe fn active_level_4_table(physical_memory_offset: VirtAddr) -> &'static mut PageTable {
