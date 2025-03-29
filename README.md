@@ -1,7 +1,9 @@
 # Rust Kernel V2
 
-A basic x86_64 os kernel made in rust (rewrite of rusty_os)\
-Contributors are welcome\
+A basic x86_64 os kernel made in rust.
+
+Contributors are welcome.
+
 :warning: This project is a mess, and will probably be so for a long time. 
 
 ## [LICENSE](LICENSE)
