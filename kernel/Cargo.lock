@@ -189,7 +189,6 @@ dependencies = [
  "linked_list_allocator",
  "pc-keyboard",
  "spin 0.10.0",
- "volatile 0.3.0",
  "x86",
  "x86_64",
 ]
@@ -426,12 +425,6 @@ checksum = "5a5f39404a5da50712a4c1eecf25e90dd62b613502b7e925fd4e4d19b5c96512"
 
 [[package]]
 name = "volatile"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8e76fae08f03f96e166d2dfda232190638c10e0383841252416f9cfe2ae60e6"
-
-[[package]]
-name = "volatile"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "442887c63f2c839b346c192d047a7c87e73d0689c9157b00b53dcc27dd5ea793"
@@ -520,5 +513,5 @@ dependencies = [
  "bit_field",
  "bitflags 2.9.0",
  "rustversion",
- "volatile 0.4.6",
+ "volatile",
 ]

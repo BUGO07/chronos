@@ -1,24 +1,17 @@
-use crate::arch::drivers::uart::SerialPort;
-use core::fmt::Write;
-use lazy_static::lazy_static;
-use spin::Mutex;
-use x86_64::instructions::interrupts;
+use x86_64::instructions::{interrupts, port::Port};
 
-lazy_static! {
-    pub static ref SERIAL1: Mutex<SerialPort> = {
-        let mut serial_port = unsafe { SerialPort::new(0x3f8) };
-        serial_port.init();
-        Mutex::new(serial_port)
-    };
-}
+use core::fmt::Write;
 
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
     interrupts::without_interrupts(|| {
-        SERIAL1
-            .lock()
-            .write_fmt(args)
-            .expect("Printing to serial failed");
+        let mut port: Port<u8> = Port::new(0x3f8);
+        let mut buf = crate::utils::Buffer::new();
+        write!(buf, "{}", args);
+
+        for byte in buf.as_slice() {
+            unsafe { port.write(*byte) };
+        }
     });
 }
 

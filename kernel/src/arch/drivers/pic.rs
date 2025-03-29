@@ -11,7 +11,6 @@ pub fn send_eoi() {
         Port::new(0xA0).write(0x20u8);
         Port::new(0x20).write(0x20u8);
     }
-    // MASTER.lock().send_eoi();
 }
 
 pub fn unmask() {
