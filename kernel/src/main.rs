@@ -10,6 +10,7 @@
 
 pub mod arch;
 pub mod memory;
+pub mod task;
 pub mod utils;
 
 #[cfg(feature = "tests")]
@@ -17,9 +18,11 @@ pub mod tests;
 
 extern crate alloc;
 
+use arch::time::print_time;
 use core::panic::PanicInfo;
 use limine::BaseRevision;
 use limine::request::{RequestsEndMarker, RequestsStartMarker};
+// use task::executor::Executor;
 use utils::halt_loop;
 
 #[used]
@@ -44,14 +47,21 @@ unsafe extern "C" fn kmain() -> ! {
     arch::drivers::pic::init();
     memory::init();
 
-    #[cfg(feature = "tests")]
-    tests::init();
-
     println!("\n--------------------------------------\n");
 
     info!("up and running");
 
-    halt_loop()
+    // let mut executor = Executor::new();
+    // executor.run();
+
+    #[cfg(feature = "tests")]
+    tests::init();
+
+    halt_loop();
+}
+
+async fn printstuff() {
+    print_time();
 }
 
 #[panic_handler]

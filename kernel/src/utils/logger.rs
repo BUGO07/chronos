@@ -1,6 +1,5 @@
 use core::fmt::Write;
 
-use lazy_static::lazy_static;
 use x86_64::instructions::interrupts;
 
 use crate::{serial_print, utils::term::WRITER};
@@ -17,25 +16,17 @@ pub struct Color {
     pub white: &'static str,
 }
 
-impl Color {
-    fn default() -> Color {
-        Color {
-            reset: "\x1b[0m",
-            black: "\x1b[0;30m",
-            red: "\x1b[0;31m",
-            green: "\x1b[0;32m",
-            yellow: "\x1b[0;33m",
-            blue: "\x1b[0;34m",
-            purple: "\x1b[0;35m",
-            cyan: "\x1b[0;36m",
-            white: "\x1b[0;37m",
-        }
-    }
-}
-
-lazy_static! {
-    pub static ref COLOR: Color = Color::default();
-}
+pub const COLOR: Color = Color {
+    reset: "\x1b[0m",
+    black: "\x1b[0;30m",
+    red: "\x1b[0;31m",
+    green: "\x1b[0;32m",
+    yellow: "\x1b[0;33m",
+    blue: "\x1b[0;34m",
+    purple: "\x1b[0;35m",
+    cyan: "\x1b[0;36m",
+    white: "\x1b[0;37m",
+};
 
 // janky but whatever
 pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::fmt::Arguments) {

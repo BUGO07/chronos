@@ -1,17 +1,19 @@
 use crate::{
-    arch::{drivers::pic, gdt},
+    arch::{
+        drivers::pic,
+        gdt,
+        time::{PIT_FREQUENCY, print_time, timer_interrupt_handler},
+    },
     halt_loop, info, print, println,
 };
 use lazy_static::lazy_static;
-use pc_keyboard::{DecodedKey, HandleControl, Keyboard, ScancodeSet1, layouts};
+use pc_keyboard::{DecodedKey, HandleControl, KeyCode, Keyboard, ScancodeSet1, layouts};
 use spin::Mutex;
 use x86_64::{
     instructions::port::Port,
     registers::control::Cr2,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
-
-use super::time::ONE_MS;
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -29,27 +31,16 @@ lazy_static! {
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt
     };
-    // static ref TIME: Mutex<Time> = Mutex::new(Time(0.0));
 }
 
 pub fn init_idt() {
     info!("initializing idt");
     IDT.load();
-
-    info!("setting the timer to 1ms");
-    //roughly 1ms
     unsafe {
         Port::new(0x43).write(0b00110100u8);
-        Port::new(0x40).write(ONE_MS & 0xFF);
-        Port::new(0x40).write(ONE_MS >> 8);
+        Port::new(0x40).write(PIT_FREQUENCY & 0xFF);
+        Port::new(0x40).write(PIT_FREQUENCY >> 8);
     }
-}
-
-extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    // by 1ms
-    // TIME.lock().increment(0.001);
-    // info!("{}", TIME.lock().0);
-    pic::send_eoi();
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
@@ -70,7 +61,11 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
         if let Some(key) = keyboard.process_keyevent(key_event) {
             match key {
                 DecodedKey::Unicode(character) => print!("{}", character),
-                DecodedKey::RawKey(key) => print!("{:?}", key),
+                DecodedKey::RawKey(key) => {
+                    if key == KeyCode::F1 {
+                        print_time();
+                    }
+                }
             }
         }
     }
@@ -78,7 +73,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
 }
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
-    println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
+    panic!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
 extern "x86-interrupt" fn general_protection_fault_handler(

@@ -56,7 +56,6 @@ pub fn init_heap(
     }
 
     unsafe {
-        // keep an eye out for the `as *mut u8`
         ALLOCATOR.lock().init(HEAP_START, HEAP_SIZE);
     }
 
