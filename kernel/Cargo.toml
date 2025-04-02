@@ -6,16 +6,12 @@ edition = "2024"
 [dependencies]
 flanterm_bindings = "1.1.4"
 limine = "0.4"
-bitflags = "2.9.0"
-conquer-once = { version = "0.4.0", default-features = false }
 crossbeam-queue = { version = "0.3.12", default-features = false, features = ["alloc"] }
-futures-util = { version = "0.3.31", default-features = false, features = ["alloc"] }
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
-linked_list_allocator = "0.10.5"
 pc-keyboard = "0.8.0"
 spin = "0.10.0"
-x86 = "0.52.0"
 x86_64 = "0.15.2"
+talc = "4.4.2"
 
 [features]
 default = []

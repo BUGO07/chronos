@@ -1,5 +1,8 @@
 use crate::serial_print;
-use core::fmt::{self, Write};
+use core::{
+    fmt::{self, Write},
+    ptr::null_mut,
+};
 use lazy_static::lazy_static;
 use limine::request::FramebufferRequest;
 use spin::Mutex;
@@ -10,7 +13,7 @@ lazy_static! {
 }
 
 pub struct Writer {
-    ctx: Option<*mut flanterm_bindings::flanterm_context>,
+    pub ctx: Option<*mut flanterm_bindings::flanterm_context>,
 }
 
 unsafe impl Send for Writer {}
@@ -38,20 +41,20 @@ impl Writer {
                             framebuffer.green_mask_shift(),
                             framebuffer.blue_mask_size(),
                             framebuffer.blue_mask_shift(),
-                            core::ptr::null_mut::<u32>(),
-                            core::ptr::null_mut::<u32>(),
-                            core::ptr::null_mut::<u32>(),
-                            core::ptr::null_mut::<u32>(),
-                            core::ptr::null_mut::<u32>(),
-                            core::ptr::null_mut::<u32>(),
-                            core::ptr::null_mut::<u32>(),
-                            core::ptr::null_mut::<::core::ffi::c_void>(),
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            9,
+                            18,
+                            1,
+                            1,
+                            1,
+                            10,
                         )),
                     }
                 }
