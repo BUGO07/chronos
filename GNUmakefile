@@ -6,7 +6,7 @@ MAKEFLAGS += -rR
 override USER_VARIABLE = $(if $(filter $(origin $(1)),default undefined),$(eval override $(1) := $(2)))
 
 # Default user QEMU flags. These are appended to the QEMU command calls.
-$(call USER_VARIABLE,QEMUFLAGS,-enable-kvm -m 2G -d int -D int.txt)
+$(call USER_VARIABLE,QEMUFLAGS,-enable-kvm -no-reboot -no-shutdown -m 2G -d int -D int.txt)
 
 override IMAGE_NAME := kernel-x86_64
 

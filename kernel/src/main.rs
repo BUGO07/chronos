@@ -2,11 +2,14 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 #![feature(sync_unsafe_cell)]
+#![feature(cell_update)]
+#![feature(allocator_api)]
 #![allow(
     clippy::missing_safety_doc,
     clippy::new_without_default,
     clippy::zero_ptr
 )]
+#![warn(static_mut_refs)]
 
 pub mod arch;
 pub mod memory;
@@ -18,7 +21,6 @@ pub mod tests;
 
 extern crate alloc;
 
-use arch::time::print_time;
 use core::panic::PanicInfo;
 use limine::BaseRevision;
 use limine::request::{RequestsEndMarker, RequestsStartMarker};
@@ -36,6 +38,7 @@ static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 #[used]
 #[unsafe(link_section = ".requests_end_marker")]
 static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
     assert!(BASE_REVISION.is_supported());
@@ -45,10 +48,12 @@ unsafe extern "C" fn kmain() -> ! {
     arch::gdt::init();
     arch::interrupts::init_idt();
     arch::drivers::pic::init();
+    arch::drivers::pit::init();
     memory::init();
 
     println!("\n--------------------------------------\n");
 
+    debug!("debug rahh");
     info!("up and running");
 
     // let mut executor = Executor::new();
@@ -58,10 +63,6 @@ unsafe extern "C" fn kmain() -> ! {
     tests::init();
 
     halt_loop();
-}
-
-async fn printstuff() {
-    print_time();
 }
 
 #[panic_handler]

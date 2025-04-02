@@ -1,0 +1,198 @@
+Looking for matches…
+Required runtime for com.stremio.Stremio/x86_64/stable (runtime/org.kde.Platform/x86_64/5.15-24.08) found in remote flathub
+
+com.stremio.Stremio permissions:
+    ipc	network	fallback-x11	pulseaudio
+    wayland	x11	dri	file access [1]
+    dbus access [2]
+
+    [1] xdg-config/kdeglobals:ro
+    [2] com.canonical.AppMenu.Registrar, org.freedesktop.Notifications,
+        org.freedesktop.ScreenSaver, org.kde.KGlobalSettings,
+        org.kde.StatusNotifierWatcher, org.kde.kconfig.notify
+
+
+ 1.	   	com.stremio.Stremio.Locale	stable	i	flathub	< 83,7 MB (partial)
+ 2.	   	org.freedesktop.Platform.GL.nvidia-570-133-07	1.4	u	flathub	< 376,9 MB
+ 3.	   	org.kde.KStyle.Adwaita	5.15-24.08	i	flathub	< 6,7 MB
+ 4.	   	org.kde.Platform.Locale	5.15-24.08	i	flathub	< 402,2 MB (partial)
+ 5.	   	org.kde.Platform	5.15-24.08	i	flathub	< 375,8 MB
+ 6.	   	com.stremio.Stremio	stable	i	flathub	< 110,6 MB
+
+
+Installing 1/6…
+Installing 1/6…                        0%  0 bytes/s
+Installing 1/6…                        0%
+Installing 1/6… ▌                      3%
+Installing 1/6… ▊                      4%
+Installing 1/6… ████████████████████ 100%  6,0 kB/s
+Updating 2/6…
+Updating 2/6…                        0%  0 bytes/s
+Updating 2/6…                        0%
+Updating 2/6… █▌                     8%  2,9 kB/s
+Updating 2/6… █▌                     8%  35,0 kB/s
+Updating 2/6… █▌                     8%  204,8 kB/s
+Updating 2/6… █▊                     9%  2,6 MB/s
+Updating 2/6… ██▍                   12%  4,7 MB/s  00:29
+Updating 2/6… ███                   15%  6,0 MB/s  00:28
+Updating 2/6… ███▌                  18%  7,0 MB/s  00:27
+Updating 2/6… ████▏                 21%  7,6 MB/s  00:26
+Updating 2/6… ████▌                 23%  8,1 MB/s  00:26
+Updating 2/6… █████▏                26%  8,4 MB/s  00:25
+Updating 2/6… █████▊                29%  8,7 MB/s  00:24
+Updating 2/6… ██████▍               32%  9,0 MB/s  00:23
+Updating 2/6… ██████▊               34%  9,1 MB/s  00:23
+Updating 2/6… ███████▍              37%  9,1 MB/s  00:22
+Updating 2/6… ███████▊              39%  9,3 MB/s  00:21
+Updating 2/6… ████████▍             42%  9,4 MB/s  00:20
+Updating 2/6… █████████             45%  9,6 MB/s  00:19
+Updating 2/6… █████████▌            48%  9,6 MB/s  00:18
+Updating 2/6… ██████████▏           51%  9,8 MB/s  00:17
+Updating 2/6… ██████████▌           53%  9,9 MB/s  00:16
+Updating 2/6… ███████████▏          56%  9,9 MB/s  00:15
+Updating 2/6… ███████████▊          59%  10,0 MB/s  00:14
+Updating 2/6… ████████████▍         62%  10,1 MB/s  00:13
+Updating 2/6… █████████████         65%  10,2 MB/s  00:12
+Updating 2/6… █████████████▍        67%  10,1 MB/s  00:11
+Updating 2/6… ██████████████        70%  10,2 MB/s  00:10
+Updating 2/6… ██████████████▌       73%  10,2 MB/s  00:09
+Updating 2/6… ███████████████       75%  10,3 MB/s  00:09
+Updating 2/6… ███████████████▌      78%  10,3 MB/s  00:07
+Updating 2/6… ████████████████▏     81%  10,4 MB/s  00:06
+Updating 2/6… ████████████████▊     84%  10,4 MB/s  00:05
+Updating 2/6… █████████████████▍    87%  10,4 MB/s  00:04
+Updating 2/6… █████████████████▊    89%  10,4 MB/s  00:03
+Updating 2/6… ██████████████████▍   92%  10,5 MB/s  00:02
+Updating 2/6… ██████████████████▊   94%  10,4 MB/s  00:02
+Updating 2/6… ███████████████████▍  97%  10,5 MB/s  00:01
+Updating 2/6… ████████████████████ 100%  10,4 MB/s  00:00
+Installing 3/6…
+Installing 3/6…                        0%  0 bytes/s
+Installing 3/6…                        0%
+Installing 3/6… █▌                     8%
+Installing 3/6… ███▏                  16%  583,1 kB/s
+Installing 3/6… ██████▌               33%  1,8 MB/s
+Installing 3/6… █████████████████▌    88%  5,8 MB/s
+Installing 3/6… ████████████████████ 100%  6,7 MB/s
+Installing 4/6…
+Installing 4/6…                        0%  0 bytes/s
+Installing 4/6…                        0%
+Installing 4/6… ▌                      3%
+Installing 4/6… ▊                      4%
+Installing 4/6… ▊                      4%  49,3 kB/s
+Installing 4/6… ██████████████▊       74%  168,3 kB/s
+Installing 4/6… ████████████████████ 100%  332,2 kB/s
+Installing 5/6…
+Installing 5/6…                        0%  0 bytes/s
+Installing 5/6…                        0%
+Installing 5/6… ▍                      2%  770,5 kB/s
+Installing 5/6… █▊                     9%  2,0 MB/s
+Installing 5/6… ██                    10%  5,0 MB/s
+Installing 5/6… ██▏                   11%  7,9 MB/s
+Installing 5/6… ██▌                   13%  5,4 MB/s
+Installing 5/6… ██▊                   14%  6,9 MB/s
+Installing 5/6… ███▏                  16%  8,5 MB/s
+Installing 5/6… ███▌                  18%  6,7 MB/s
+Installing 5/6… ███▊                  19%  7,4 MB/s
+Installing 5/6… ███▊                  19%  7,8 MB/s
+Installing 5/6… ████▏                 21%  6,9 MB/s  00:15
+Installing 5/6… ████▍                 22%  7,5 MB/s  00:14
+Installing 5/6… ████▊                 24%  8,1 MB/s  00:12
+Installing 5/6… █████                 25%  7,0 MB/s  00:15
+Installing 5/6… █████▏                26%  7,5 MB/s  00:14
+Installing 5/6… █████▌                28%  6,9 MB/s  00:15
+Installing 5/6… ██████                30%  7,6 MB/s  00:14
+Installing 5/6… ██████▍               32%  8,1 MB/s  00:12
+Installing 5/6… ██████▌               33%  7,3 MB/s  00:14
+Installing 5/6… ██████▊               34%  7,7 MB/s  00:13
+Installing 5/6… ███████▍              37%  7,3 MB/s  00:13
+Installing 5/6… ███████▍              37%  7,3 MB/s  00:13
+Installing 5/6… ███████▊              39%  7,9 MB/s  00:12
+Installing 5/6… ████████              40%  7,3 MB/s  00:13
+Installing 5/6… ████████▍             42%  7,6 MB/s  00:12
+Installing 5/6… ████████▌             43%  7,1 MB/s  00:13
+Installing 5/6… █████████             45%  7,5 MB/s  00:12
+Installing 5/6… █████████▌            48%  7,3 MB/s  00:11
+Installing 5/6… █████████▊            49%  7,6 MB/s  00:11
+Installing 5/6… ██████████▏           51%  7,9 MB/s  00:10
+Installing 5/6… ██████████▏           51%  7,3 MB/s  00:11
+Installing 5/6… ██████████▊           54%  7,7 MB/s  00:10
+Installing 5/6… ███████████▏          56%  7,5 MB/s  00:10
+Installing 5/6… ███████████▌          58%  7,8 MB/s  00:09
+Installing 5/6… ███████████▊          59%  8,0 MB/s  00:09
+Installing 5/6… ████████████          60%  7,6 MB/s  00:09
+Installing 5/6… ████████████▌         63%  7,9 MB/s  00:08
+Installing 5/6… █████████████         65%  7,7 MB/s  00:08
+Installing 5/6… █████████████▍        67%  7,9 MB/s  00:07
+Installing 5/6… █████████████▌        68%  8,1 MB/s  00:07
+Installing 5/6… █████████████▊        69%  7,7 MB/s  00:07
+Installing 5/6… ██████████████▏       71%  8,0 MB/s  00:06
+Installing 5/6… ██████████████▏       71%  8,0 MB/s  00:06
+Installing 5/6… ██████████████▊       74%  7,9 MB/s  00:05
+Installing 5/6… ███████████████▏      76%  8,1 MB/s  00:05
+Installing 5/6… ███████████████▌      78%  8,3 MB/s  00:04
+Installing 5/6… ███████████████▊      79%  8,0 MB/s  00:04
+Installing 5/6… ████████████████▏     81%  8,2 MB/s  00:04
+Installing 5/6… ████████████████▌     83%  8,4 MB/s  00:03
+Installing 5/6… █████████████████     85%  8,6 MB/s  00:03
+Installing 5/6… █████████████████▏    86%  8,3 MB/s  00:03
+Installing 5/6… █████████████████▊    89%  8,6 MB/s  00:02
+Installing 5/6… ██████████████████    90%  8,3 MB/s  00:02
+Installing 5/6… ██████████████████▏   91%  8,4 MB/s  00:01
+Installing 5/6… ██████████████████▌   93%  8,6 MB/s  00:01
+Installing 5/6… ██████████████████▊   94%  8,3 MB/s  00:01
+Installing 5/6… ███████████████████▏  96%  8,4 MB/s  00:00
+Installing 5/6… ███████████████████▍  97%  8,6 MB/s  00:00
+Installing 5/6… ███████████████████▊  99%  8,3 MB/s  00:00
+Installing 5/6… ████████████████████ 100%  8,4 MB/s  00:00
+Installing 5/6… ████████████████████ 100%  8,4 MB/s  00:00
+Installing 6/6…
+Installing 6/6…                        0%  0 bytes/s
+Installing 6/6…                        0%
+Installing 6/6… █▌                     8%
+Installing 6/6… ██▏                   11%  4,1 MB/s
+Installing 6/6… ██▊                   14%  7,0 MB/s
+Installing 6/6… ███▏                  16%  10,1 MB/s
+Installing 6/6… ███▊                  19%  6,6 MB/s
+Installing 6/6… ████▏                 21%  8,0 MB/s
+Installing 6/6… ████▊                 24%  9,6 MB/s
+Installing 6/6… █████▍                27%  7,5 MB/s
+Installing 6/6… ██████                30%  8,6 MB/s
+Installing 6/6… ██████▍               32%  9,7 MB/s
+Installing 6/6… ███████               35%  10,8 MB/s
+Installing 6/6… ███████▌              38%  8,8 MB/s  00:06
+Installing 6/6… ████████▍             42%  9,9 MB/s  00:05
+Installing 6/6… ████████▊             44%  8,4 MB/s  00:06
+Installing 6/6… █████████▏            46%  8,9 MB/s  00:05
+Installing 6/6… █████████▌            48%  9,5 MB/s  00:05
+Installing 6/6… ██████████▏           51%  10,0 MB/s  00:04
+Installing 6/6… ██████████▌           53%  8,8 MB/s  00:05
+Installing 6/6… ███████████           55%  9,3 MB/s  00:04
+Installing 6/6… ███████████▌          58%  9,7 MB/s  00:04
+Installing 6/6… ████████████          60%  8,8 MB/s  00:04
+Installing 6/6… ████████████▌         63%  9,2 MB/s  00:04
+Installing 6/6… █████████████         65%  9,6 MB/s  00:03
+Installing 6/6… █████████████▌        68%  8,7 MB/s  00:03
+Installing 6/6… ██████████████        70%  9,1 MB/s  00:03
+Installing 6/6… ██████████████▌       73%  9,5 MB/s  00:02
+Installing 6/6… ███████████████       75%  9,9 MB/s  00:02
+Installing 6/6… ███████████████▌      78%  9,1 MB/s  00:02
+Installing 6/6… ████████████████▏     81%  9,5 MB/s  00:02
+Installing 6/6… ████████████████▊     84%  9,8 MB/s  00:01
+Installing 6/6… █████████████████▏    86%  9,2 MB/s  00:01
+Installing 6/6… █████████████████▊    89%  9,5 MB/s  00:01
+Installing 6/6… ██████████████████▍   92%  9,8 MB/s  00:00
+Installing 6/6… ███████████████████   95%  9,2 MB/s  00:00
+Installing 6/6… ███████████████████▌  98%  9,6 MB/s  00:00
+Installing 6/6… ████████████████████ 100%  9,7 MB/s  00:00
+Installing 6/6… ████████████████████ 100%  8,9 MB/s  00:00
+Changes complete.
+
+
+ 1.	   	com.stremio.Stremio	stable	r
+ 2.	   	com.stremio.Stremio.Locale	stable	r
+
+
+Uninstalling 1/2…
+Uninstalling 2/2…
+Uninstall complete.

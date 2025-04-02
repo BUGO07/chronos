@@ -1,8 +1,10 @@
 use crate::{
     arch::{
-        drivers::pic,
+        drivers::{
+            pic,
+            pit::{time, timer_interrupt_handler},
+        },
         gdt,
-        time::{PIT_FREQUENCY, print_time, timer_interrupt_handler},
     },
     halt_loop, info, print, println,
 };
@@ -36,11 +38,6 @@ lazy_static! {
 pub fn init_idt() {
     info!("initializing idt");
     IDT.load();
-    unsafe {
-        Port::new(0x43).write(0b00110100u8);
-        Port::new(0x40).write(PIT_FREQUENCY & 0xFF);
-        Port::new(0x40).write(PIT_FREQUENCY >> 8);
-    }
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
@@ -63,7 +60,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
                 DecodedKey::Unicode(character) => print!("{}", character),
                 DecodedKey::RawKey(key) => {
                     if key == KeyCode::F1 {
-                        print_time();
+                        println!("{}", time());
                     }
                 }
             }
