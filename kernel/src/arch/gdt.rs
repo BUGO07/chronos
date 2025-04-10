@@ -9,7 +9,7 @@ use x86_64::{
     },
 };
 
-use crate::info;
+use crate::{debug, info};
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
@@ -54,13 +54,13 @@ pub fn init() {
     info!("loading gdt");
     GDT.0.load();
     unsafe {
-        info!("loading code segment");
+        debug!("loading code segment");
         CS::set_reg(GDT.1.code_selector);
 
-        info!("loading tss");
+        debug!("loading tss");
         load_tss(GDT.1.tss_selector);
 
-        info!("loading data segments");
+        debug!("loading data segments");
         SS::set_reg(GDT.1.data_selector);
         FS::set_reg(GDT.1.data_selector);
         GS::set_reg(GDT.1.data_selector);

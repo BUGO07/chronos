@@ -1,15 +1,6 @@
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
-#![feature(sync_unsafe_cell)]
-#![feature(cell_update)]
-#![feature(allocator_api)]
-#![allow(
-    clippy::missing_safety_doc,
-    clippy::new_without_default,
-    clippy::zero_ptr
-)]
-#![warn(static_mut_refs)]
 
 pub mod arch;
 pub mod memory;
@@ -23,8 +14,9 @@ extern crate alloc;
 
 use core::panic::PanicInfo;
 use limine::BaseRevision;
-use limine::request::{RequestsEndMarker, RequestsStartMarker};
-// use task::executor::Executor;
+use limine::request::{DateAtBootRequest, RequestsEndMarker, RequestsStartMarker};
+use task::Task;
+use task::executor::Executor;
 use utils::halt_loop;
 
 #[used]
@@ -39,11 +31,15 @@ static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 #[unsafe(link_section = ".requests_end_marker")]
 static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
+#[used]
+#[unsafe(link_section = ".requests")]
+static BOOT_DATE: DateAtBootRequest = DateAtBootRequest::new();
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
     assert!(BASE_REVISION.is_supported());
 
-    info!("starting kernel...\n");
+    info!("x86_64 kernel starting...\n");
 
     arch::gdt::init();
     arch::interrupts::init_idt();
@@ -56,13 +52,21 @@ unsafe extern "C" fn kmain() -> ! {
     debug!("debug rahh");
     info!("up and running");
 
-    // let mut executor = Executor::new();
-    // executor.run();
+    let (years, months, days, hours, minutes, seconds) =
+        utils::time::unix_to_date(BOOT_DATE.get_response().unwrap().timestamp());
+    info!(
+        "{}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+        years, months, days, hours, minutes, seconds
+    );
 
     #[cfg(feature = "tests")]
     tests::init();
 
-    halt_loop();
+    let mut executor = Executor::new();
+    executor.spawn(Task::new(task::keyboard::handle_keypresses()));
+    executor.run();
+
+    // halt_loop();
 }
 
 #[panic_handler]

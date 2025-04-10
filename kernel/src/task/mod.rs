@@ -7,6 +7,7 @@ use core::{
 };
 
 pub mod executor;
+pub mod keyboard;
 
 pub struct Task {
     id: TaskId,

@@ -1,6 +1,6 @@
 use x86_64::instructions::port::Port;
 
-use crate::info;
+use crate::{debug, info};
 
 const ICW1_ICW4: u8 = 0x01;
 const ICW4_8086: u8 = 0x01;
@@ -14,7 +14,7 @@ pub fn send_eoi() {
 }
 
 pub fn unmask() {
-    info!("unmasking all irqs");
+    debug!("unmasking all irqs");
     unsafe {
         Port::new(0x21).write(0u8);
         Port::new(0xA1).write(0u8);
@@ -22,7 +22,7 @@ pub fn unmask() {
 }
 
 pub fn disable() {
-    info!("masking all irqs");
+    debug!("masking all irqs");
     unsafe {
         Port::new(0x21).write(0xffu8);
         Port::new(0xA1).write(0xffu8);
@@ -30,7 +30,7 @@ pub fn disable() {
 }
 
 pub fn init() {
-    info!("remapping");
+    info!("remapping pic");
 
     let mut master_command: Port<u8> = Port::new(0x20);
     let mut master_data: Port<u8> = Port::new(0x21);
@@ -59,5 +59,7 @@ pub fn init() {
 
     // limine masks all irqs by default
     unmask();
+
+    debug!("enabling interrupts (sti)");
     x86_64::instructions::interrupts::enable();
 }

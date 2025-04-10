@@ -4,6 +4,7 @@ use x86_64::instructions::port::Port;
 
 pub mod logger;
 pub mod term;
+pub mod time;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]

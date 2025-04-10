@@ -17,6 +17,9 @@ Contributors are welcome.
 - PS/2 Keyboard
 - Time
 
+## Known Bugs
+- Overflow panic in vmm on real hardware.
+
 ## Building And Running
 
 Make sure you have the following installed:

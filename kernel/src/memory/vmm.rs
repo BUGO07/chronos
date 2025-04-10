@@ -1,11 +1,16 @@
-use core::alloc::Layout;
+use core::{alloc::Layout, arch::asm};
 
 use lazy_static::lazy_static;
-use limine::memory_map::EntryType;
+use limine::{
+    memory_map::EntryType,
+    request::{ExecutableAddressRequest, ExecutableFileRequest},
+};
 use spin::Mutex;
 use x86_64::{align_down, align_up};
 
-use crate::{debug, info, memory::ALLOCATOR};
+use crate::{debug, info};
+
+use super::{ALLOCATOR, get_hhdm_offset};
 
 pub mod page_size {
     pub const SMALL: u64 = 0x1000; // 4KiB
@@ -27,15 +32,21 @@ lazy_static! {
 
 unsafe impl Send for Pagemap {}
 
+#[unsafe(link_section = ".requests")]
+static EXECUTABLE_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
+
+#[unsafe(link_section = ".requests")]
+static EXECUTABLE_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
+
 #[repr(C)]
 #[repr(packed)]
-struct Table {
+pub struct Table {
     entries: [u64; 512],
 }
 
 #[derive(Copy, Clone)]
 pub struct Pagemap {
-    top_level: *mut Table,
+    pub top_level: *mut Table,
 }
 
 impl Pagemap {
@@ -91,20 +102,27 @@ impl Pagemap {
 }
 
 fn alloc_table() -> *mut Table {
-    unsafe {
+    let ptr = unsafe {
         (ALLOCATOR
             .lock()
             .malloc(Layout::from_size_align(0x1000, 0x1000).unwrap())
             .unwrap()
             .as_ptr() as u64
             - super::get_hhdm_offset()) as *mut Table
+    };
+    unsafe {
+        for i in 0..512 {
+            (*((ptr as u64 + get_hhdm_offset()) as *mut Table)).entries[i] = 0;
+        }
     }
+    ptr
 }
 
 fn get_next_level(top_level: *mut Table, idx: u64, allocate: bool) -> *mut Table {
     unsafe {
         let entry = (top_level as u64 + idx * 8) as *mut u64;
         if *entry & flag::PRESENT != 0 {
+            // println!("0x{:X}", *entry & 0x000FFFFFFFFFF000);
             return ((*entry & 0x000FFFFFFFFFF000) + super::get_hhdm_offset()) as *mut Table;
         }
 
@@ -136,9 +154,9 @@ pub fn init() {
             continue;
         }
 
-        let psize = if entry.length > page_size::MEDIUM {
+        let psize = if entry.length >= page_size::LARGE {
             page_size::LARGE
-        } else if entry.length > page_size::SMALL {
+        } else if entry.length >= page_size::MEDIUM {
             page_size::MEDIUM
         } else {
             page_size::SMALL
@@ -157,5 +175,28 @@ pub fn init() {
         for i in (base..end).step_by(psize as usize) {
             pmap.map(i + hhdm_offset, i, flag::PRESENT | flag::WRITE, psize);
         }
+    }
+
+    let executable_address_response = EXECUTABLE_ADDRESS_REQUEST.get_response().unwrap();
+    let phys_base = executable_address_response.physical_base();
+    let virt_base = executable_address_response.virtual_base();
+
+    let size = EXECUTABLE_FILE_REQUEST
+        .get_response()
+        .unwrap()
+        .file()
+        .size();
+
+    for i in (0..size).step_by(page_size::SMALL as usize) {
+        pmap.map(
+            virt_base + i,
+            phys_base + i,
+            flag::PRESENT | flag::WRITE,
+            page_size::SMALL,
+        );
+    }
+    let addr = pmap.top_level as u64;
+    unsafe {
+        asm!("mov cr3, {}", in(reg) addr, options(nostack));
     }
 }
