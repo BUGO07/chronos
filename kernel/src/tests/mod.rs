@@ -1,8 +1,8 @@
-use crate::{print, println};
+use crate::{print, println, utils::halt_loop};
 
-pub mod memory;
+mod memory;
 
-pub trait Testable {
+trait Testable {
     fn run(&self);
 }
 
@@ -24,16 +24,17 @@ fn test_runner(tests: &[&dyn Testable]) {
     }
 }
 
-pub fn init() {
+pub fn init() -> ! {
     println!("Basic tests...");
     test_runner(&[&add, &bool_check, &basic_loop]);
-    println!("\nMemory tests");
+    println!("\nMemory tests...");
     test_runner(&[
         &memory::simple_allocation,
         &memory::large_vec,
         &memory::many_boxes,
     ]);
     crate::utils::exit_qemu(crate::utils::QemuExitCode::Success);
+    halt_loop()
 }
 
 fn add() {
@@ -43,7 +44,7 @@ fn add() {
 
 fn bool_check() {
     let x = true;
-    assert!(x)
+    assert!(x);
 }
 
 fn basic_loop() {
@@ -54,5 +55,5 @@ fn basic_loop() {
             break;
         }
     }
-    assert_eq!(i, 6)
+    assert_eq!(i, 6);
 }

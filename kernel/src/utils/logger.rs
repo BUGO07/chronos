@@ -4,63 +4,56 @@ use x86_64::instructions::interrupts;
 
 use crate::{arch::drivers::pit, serial_print, utils::term::WRITER};
 
-pub struct Color {
-    pub reset: &'static str,
-    pub black: &'static str,
-    pub gray: &'static str,
-    pub red: &'static str,
-    pub green: &'static str,
-    pub yellow: &'static str,
-    pub blue: &'static str,
-    pub purple: &'static str,
-    pub cyan: &'static str,
-    pub white: &'static str,
+pub mod color {
+    pub const RESET: &str = "\x1b[0m";
+    pub const BLACK: &str = "\x1b[0;30m";
+    pub const GRAY: &str = "\x1b[38;5;243m";
+    pub const RED: &str = "\x1b[0;31m";
+    pub const GREEN: &str = "\x1b[0;32m";
+    pub const YELLOW: &str = "\x1b[38;5;226m";
+    pub const BLUE: &str = "\x1b[38;5;69m";
+    pub const PURPLE: &str = "\x1b[0;35m";
+    pub const CYAN: &str = "\x1b[0;36m";
+    pub const WHITE: &str = "\x1b[0;37m";
 }
-
-pub const COLOR: Color = Color {
-    reset: "\x1b[0m",
-    black: "\x1b[0;30m",
-    gray: "\x1b[38;5;243m",
-    red: "\x1b[0;31m",
-    green: "\x1b[0;32m",
-    yellow: "\x1b[38;5;226m",
-    blue: "\x1b[38;5;69m",
-    purple: "\x1b[0;35m",
-    cyan: "\x1b[0;36m",
-    white: "\x1b[0;37m",
-};
 
 // janky but whatever
 pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::fmt::Arguments) {
     #[cfg(not(feature = "tests"))]
     {
+        if level == "DEBUG" && !cfg!(debug_assertions) {
+            return;
+        }
         module_path = module_path.split("::").last().unwrap();
+        let ms = pit::time_ms();
         interrupts::without_interrupts(|| {
             let mut writer = WRITER.lock();
             writer
                 .write_fmt(format_args!(
-                    "[{:.03}] [{}{}{}] {}{}:{} {}\n",
-                    pit::time(),
+                    "[{}.{:03}] [{}{}{}] {}{}:{} {}\n",
+                    ms / 1000,
+                    ms % 1000,
                     color,
                     level,
-                    COLOR.reset,
-                    COLOR.gray,
+                    color::RESET,
+                    color::GRAY,
                     module_path,
-                    COLOR.reset,
+                    color::RESET,
                     args
                 ))
                 .expect("Printing to WRITER failed");
         });
 
         serial_print!(
-            "[{:.03}] [{}{}{}] {}{}:{} {}\n",
-            pit::time(),
+            "[{}.{:03}] [{}{}{}] {}{}:{} {}\n",
+            ms / 1000,
+            ms % 1000,
             color,
             level,
-            COLOR.reset,
-            COLOR.gray,
+            color::RESET,
+            color::GRAY,
             module_path,
-            COLOR.reset,
+            color::RESET,
             args
         );
     }
@@ -68,20 +61,20 @@ pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::
 
 #[macro_export]
 macro_rules! info {
-    ($($arg:tt)*) => ($crate::utils::logger::log_message("INFO", $crate::utils::logger::COLOR.cyan, module_path!(), format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::utils::logger::log_message("INFO", $crate::utils::logger::color::CYAN, module_path!(), format_args!($($arg)*)));
 }
 
 #[macro_export]
 macro_rules! debug {
-    ($($arg:tt)*) => ($crate::utils::logger::log_message("DEBUG", $crate::utils::logger::COLOR.blue, module_path!(), format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::utils::logger::log_message("DEBUG", $crate::utils::logger::color::BLUE, module_path!(), format_args!($($arg)*)));
 }
 
 #[macro_export]
 macro_rules! warn {
-    ($($arg:tt)*) => ($crate::utils::logger::log_message("WARN", $crate::utils::logger::COLOR.yellow, module_path!(), format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::utils::logger::log_message("WARN", $crate::utils::logger::color::YELLOW, module_path!(), format_args!($($arg)*)));
 }
 
 #[macro_export]
 macro_rules! error {
-    ($($arg:tt)*) => ($crate::utils::logger::log_message("ERROR", $crate::utils::logger::COLOR.red, module_path!(), format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::utils::logger::log_message("ERROR", $crate::utils::logger::color::RED, module_path!(), format_args!($($arg)*)));
 }
