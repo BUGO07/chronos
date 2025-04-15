@@ -20,7 +20,8 @@ Contributors are welcome.
 - Basic Shell (i know its not supposed to be there, its temporary)
 
 ## Known Bugs
-- Overflow panic in vmm on real hardware.
+
+None as of now
 
 ## Building And Running
 
@@ -36,5 +37,4 @@ Follow these steps to build and run the os
 
 2. Go to the root directory of cloned repo and run:\
 ``make run`` For UEFI mode\
-``make run-bios`` For BIOS mode\
 ``make test`` For running tests
