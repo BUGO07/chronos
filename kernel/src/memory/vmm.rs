@@ -1,3 +1,8 @@
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
+
 use core::{alloc::Layout, arch::asm};
 
 use lazy_static::lazy_static;
@@ -195,6 +200,7 @@ pub fn init() {
             page_size::SMALL,
         );
     }
+
     let addr = pmap.top_level as u64;
     unsafe {
         asm!("mov cr3, {}", in(reg) addr, options(nostack));

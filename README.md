@@ -1,4 +1,4 @@
-# Rust Kernel V2
+# ChronOS
 
 A basic x86_64 os kernel made in rust.
 
@@ -16,6 +16,8 @@ Contributors are welcome.
 - Memory Management
 - PS/2 Keyboard
 - Time
+- Async Task Executor
+- Basic Shell (i know its not supposed to be there, its temporary)
 
 ## Known Bugs
 - Overflow panic in vmm on real hardware.
@@ -30,7 +32,7 @@ Make sure you have the following installed:
 
 Follow these steps to build and run the os
 1. Clone this repo with:\
-``git clone https://github.com/BUGO07/kernel``
+``git clone https://github.com/BUGO07/chronos``
 
 2. Go to the root directory of cloned repo and run:\
 ``make run`` For UEFI mode\

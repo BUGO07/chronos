@@ -1,3 +1,8 @@
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
+
 use crate::{
     arch::{
         drivers::{pic, pit::timer_interrupt_handler},

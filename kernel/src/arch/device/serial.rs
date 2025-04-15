@@ -1,17 +1,27 @@
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
+
 use x86_64::instructions::{interrupts, port::Port};
 
 use core::fmt::Write;
 
+pub struct SerialWriter;
+
+impl Write for SerialWriter {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for byte in s.chars() {
+            unsafe { Port::new(0xe9).write(byte as u8) };
+        }
+        Ok(())
+    }
+}
+
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
     interrupts::without_interrupts(|| {
-        let mut port: Port<u8> = Port::new(0x3f8);
-        let mut buf = crate::utils::Buffer::new();
-        write!(buf, "{}", args);
-
-        for byte in buf.as_slice() {
-            unsafe { port.write(*byte) };
-        }
+        write!(SerialWriter, "{}", args).ok();
     });
 }
 

@@ -3,5 +3,4 @@
     Released under EUPL 1.2 License
 */
 
-pub mod pic;
-pub mod pit;
+pub mod cpu;
