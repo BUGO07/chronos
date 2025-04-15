@@ -26,7 +26,7 @@ pub mod color {
 pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::fmt::Arguments) {
     #[cfg(not(feature = "tests"))]
     {
-        if level == "DEBUG" && !cfg!(debug_assertions) {
+        if level == "debug" && !cfg!(debug_assertions) {
             return;
         }
         module_path = module_path.split("::").last().unwrap();
