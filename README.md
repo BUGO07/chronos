@@ -27,6 +27,7 @@ None as of now
 
 Make sure you have the following installed:
 * Rust
+* Clang
 * Make
 * QEMU x86-64
 * Xorriso
@@ -36,5 +37,6 @@ Follow these steps to build and run the os
 ``git clone https://github.com/BUGO07/chronos``
 
 2. Go to the root directory of cloned repo and run:\
-``make run`` For UEFI mode\
+``make run`` For running debug mode\
+``RUST_PROFILE="release" make run`` For running release mode\
 ``make test`` For running tests
