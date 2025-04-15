@@ -35,7 +35,11 @@ pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::
         let minutes = (time % 3_600_000) / 60_000;
         let seconds = (time % 60_000) / 1000;
         let millis = time % 1000;
-        let padding = if level.len() == 4 { " " } else { "" };
+        let padding = if level.len() == 4 && cfg!(debug_assertions) {
+            " "
+        } else {
+            ""
+        };
 
         if unsafe { crate::memory::FINISHED_INIT } {
             interrupts::without_interrupts(|| {
