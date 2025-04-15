@@ -1,3 +1,8 @@
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
+
 use limine::request::{HhdmRequest, MemoryMapRequest};
 use talc::*;
 
@@ -21,6 +26,8 @@ pub static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> = Talc::new(unsafe {
 })
 .lock();
 
+pub static mut FINISHED_INIT: bool = false;
+
 pub fn init() {
     info!("setting up memory");
     {
@@ -38,13 +45,18 @@ pub fn init() {
                         entry.base,
                         entry.base + hhdm_offset
                     );
-                    allocator.claim(Span::from_base_size(
-                        (entry.base + hhdm_offset) as *mut u8,
-                        entry.length as usize,
-                    ))
+                    allocator
+                        .claim(Span::from_base_size(
+                            (entry.base + hhdm_offset) as *mut u8,
+                            entry.length as usize,
+                        ))
+                        .ok()
                 };
             }
         }
+    }
+    unsafe {
+        FINISHED_INIT = true;
     }
     vmm::init();
 }

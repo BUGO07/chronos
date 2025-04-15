@@ -1,3 +1,8 @@
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
+
 use alloc::{boxed::Box, vec::Vec};
 
 pub fn simple_allocation() {

@@ -1,3 +1,8 @@
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
+
 use super::{Task, TaskId};
 use alloc::{collections::BTreeMap, sync::Arc, task::Wake};
 use core::task::{Context, Poll, Waker};

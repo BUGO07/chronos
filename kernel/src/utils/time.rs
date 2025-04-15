@@ -1,3 +1,8 @@
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
+
 use core::time::Duration;
 
 pub fn unix_to_date(datetime: Duration) -> (u32, u32, u32, u32, u32, u32) {

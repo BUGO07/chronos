@@ -1,6 +1,12 @@
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
+
 use crate::{print, println, utils::halt_loop};
 
 mod memory;
+mod time;
 
 trait Testable {
     fn run(&self);
@@ -33,6 +39,8 @@ pub fn init() -> ! {
         &memory::large_vec,
         &memory::many_boxes,
     ]);
+    println!("\nTimer tests...");
+    test_runner(&[&time::basic_timer]);
     crate::utils::exit_qemu(crate::utils::QemuExitCode::Success);
     halt_loop()
 }

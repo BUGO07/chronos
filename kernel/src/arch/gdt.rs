@@ -1,3 +1,8 @@
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
+
 use lazy_static::lazy_static;
 use x86_64::{
     VirtAddr,
