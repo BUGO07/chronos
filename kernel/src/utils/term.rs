@@ -4,6 +4,7 @@
 */
 
 use crate::{memory::FINISHED_INIT, serial_print};
+use alloc::vec::Vec;
 use core::{
     alloc::Layout,
     ffi::c_void,
@@ -16,11 +17,11 @@ use spin::Mutex;
 use x86_64::instructions::interrupts;
 
 lazy_static! {
-    pub static ref WRITER: Mutex<Writer> = Mutex::new(Writer::new());
+    pub static ref WRITERS: Mutex<Vec<Writer>> = Mutex::new(Writer::new());
 }
 
 pub struct Writer {
-    pub ctx: Option<*mut flanterm_bindings::flanterm_context>,
+    pub ctx: *mut flanterm::sys::flanterm_context,
 }
 
 unsafe impl Send for Writer {}
@@ -44,12 +45,45 @@ pub fn get_framebuffers()
     FRAMEBUFFER_REQUEST.get_response().unwrap().framebuffers()
 }
 
+const FONT_WIDTH: usize = 8;
+const FONT_HEIGHT: usize = 16;
+const FONT_SPACING: usize = 1;
+const FONT_SCALE_X: usize = 1;
+const FONT_SCALE_Y: usize = 1;
+const MARGIN: usize = 10;
+
+pub struct Cursor {
+    pub row: usize,
+    pub col: usize,
+}
+
+impl Cursor {
+    pub fn new() -> Self {
+        Self { row: 1, col: 1 }
+    }
+
+    pub fn move_to(&mut self, row: usize, col: usize) {
+        crate::print!("\x1b[{};{}H", row, col);
+    }
+
+    pub fn move_right(&mut self, n: usize) {
+        self.col += n;
+        crate::print!("\x1b[{}C", n);
+    }
+
+    pub fn move_left(&mut self, n: usize) {
+        self.col = self.col.saturating_sub(n);
+        crate::print!("\x1b[{}D", n);
+    }
+}
+
 impl Writer {
-    pub fn new() -> Writer {
-        if let Some(framebuffer) = get_framebuffers().next() {
+    pub fn new() -> Vec<Writer> {
+        let mut flanterm_contexts = Vec::new();
+        for framebuffer in get_framebuffers() {
             unsafe {
-                Self {
-                    ctx: Some(flanterm_bindings::flanterm_fb_init(
+                flanterm_contexts.push(Writer {
+                    ctx: flanterm::sys::flanterm_fb_init(
                         Some(malloc),
                         Some(free),
                         framebuffer.addr() as *mut u32,
@@ -69,25 +103,22 @@ impl Writer {
                         null_mut(),
                         null_mut(),
                         null_mut(),
-                        include_bytes!("../../assets/font.bin").as_ptr() as *mut core::ffi::c_void,
-                        8,
-                        16,
-                        1,
-                        1,
-                        1,
-                        10,
-                    )),
-                }
+                        include_bytes!("../../res/font.bin").as_ptr() as *mut core::ffi::c_void,
+                        FONT_WIDTH,
+                        FONT_HEIGHT,
+                        FONT_SPACING,
+                        FONT_SCALE_X,
+                        FONT_SCALE_Y,
+                        MARGIN,
+                    ),
+                });
             }
-        } else {
-            Self { ctx: None }
         }
+        return flanterm_contexts;
     }
 
     pub fn write(&mut self, s: &str) {
-        unsafe {
-            flanterm_bindings::flanterm_write(self.ctx.unwrap(), s.as_ptr() as *const i8, s.len())
-        };
+        unsafe { flanterm::sys::flanterm_write(self.ctx, s.as_ptr() as *const i8, s.len()) };
     }
 }
 
@@ -109,12 +140,56 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
+#[macro_export]
+macro_rules! print_fill {
+    ($what:expr) => {
+        $crate::utils::term::_print_fill($what, "")
+    };
+    ($what:expr, $with:expr) => {
+        $crate::utils::term::_print_fill($what, $with)
+    };
+}
+
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     serial_print!("{}", args);
     if unsafe { FINISHED_INIT } {
         interrupts::without_interrupts(|| {
-            WRITER.lock().write_fmt(args).expect("Printing failed");
+            for writer in WRITERS.lock().iter_mut() {
+                writer.write_fmt(args).expect("Printing failed");
+            }
+        });
+    }
+}
+
+#[doc(hidden)]
+pub fn _print_fill(what: &str, with: &str) {
+    if with.is_empty() {
+        serial_print!("{}\n", what.repeat(65));
+    } else {
+        serial_print!("{} {} {}\n", what.repeat(25), with, what.repeat(25));
+    }
+    if unsafe { FINISHED_INIT } {
+        interrupts::without_interrupts(|| {
+            for (i, writer) in WRITERS.lock().iter_mut().enumerate() {
+                let fbw = get_framebuffers().nth(i).unwrap().width() as usize;
+                if with.is_empty() {
+                    writer
+                        .write_fmt(format_args!(
+                            "{}\n",
+                            what.repeat(fbw / (FONT_WIDTH * FONT_SCALE_X) - MARGIN * 2)
+                        ))
+                        .expect("Printing failed");
+                } else {
+                    let x = what.repeat(
+                        fbw / (FONT_WIDTH * FONT_SCALE_X * 2)
+                            - (MARGIN + with.len() / 2 + 1 + with.len() % 2),
+                    );
+                    writer
+                        .write_fmt(format_args!("{} {} {}\n", x, with, x))
+                        .expect("Printing failed");
+                };
+            }
         });
     }
 }

@@ -1,4 +1,2 @@
 [unstable]
-build-std-features = ["compiler-builtins-mem"]
-build-std = ["core", "compiler_builtins", "alloc"]
-panic-abort-tests = true
+build-std = ["core", "alloc"]

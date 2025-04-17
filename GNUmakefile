@@ -33,7 +33,10 @@ test: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME)_test.iso
 run-x86_64: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME).iso
 	qemu-system-x86_64 \
 		-M q35 \
+		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+		-cpu host \
 		-debugcon stdio \
+		-device secondary-vga \
 		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-x86_64.fd,readonly=on \
 		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-x86_64.fd \
 		-boot order=d,menu=on,splash-time=0 \

@@ -4,9 +4,9 @@
 */
 
 pub fn basic_timer() {
-    let time = crate::arch::drivers::pit::time_ms();
+    let time = crate::task::timer::current_ticks();
     loop {
-        if time + 1000 < crate::arch::drivers::pit::time_ms() {
+        if time + 1000 < crate::task::timer::current_ticks() {
             break;
         }
     }
