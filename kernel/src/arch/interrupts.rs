@@ -5,7 +5,7 @@
 
 use crate::{
     arch::{drivers::pic, gdt},
-    halt_loop, info, println,
+    halt_loop, info, print, println,
 };
 use lazy_static::lazy_static;
 use x86_64::{
@@ -26,7 +26,7 @@ lazy_static! {
             .set_handler_fn(general_protection_fault_handler);
         idt[0x20].set_handler_fn(timer_interrupt_handler);
         idt[0x21].set_handler_fn(keyboard_interrupt_handler);
-        idt[0x69].set_handler_fn(lapic_timer_handler);
+        idt[0xFF].set_handler_fn(lapic_oneshot_timer_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt
     };
@@ -37,10 +37,11 @@ pub fn init_idt() {
     IDT.load();
 }
 
-extern "x86-interrupt" fn lapic_timer_handler(
+extern "x86-interrupt" fn lapic_oneshot_timer_handler(
     _stack_frame: x86_64::structures::idt::InterruptStackFrame,
 ) {
-    info!("rahhh");
+    // for now
+    print!("$ ");
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(

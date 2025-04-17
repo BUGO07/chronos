@@ -118,8 +118,6 @@ unsafe extern "C" fn kmain() -> ! {
             cpu_freq / 1_000_000_000,
             (cpu_freq % 1_000_000_000).to_string()[..2].to_string(),
         );
-
-        print!("$ ");
     }));
     executor.run();
 }
