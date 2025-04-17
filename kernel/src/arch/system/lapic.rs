@@ -11,6 +11,7 @@ use crate::{
     },
 };
 
+#[allow(dead_code)]
 mod reg {
     pub const APIC_BASE: u32 = 0x1B;
     pub const TPR: u32 = 0x80;
@@ -30,7 +31,7 @@ pub static mut LAPIC_FREQUENCY: u64 = 0;
 
 pub fn init() {
     let mut val = super::cpu::read_msr(reg::APIC_BASE);
-    let phys_mmio = val & 0xFFF;
+    let phys_mmio = val & 0xFFFFF000;
 
     val |= 1 << 11;
     super::cpu::write_msr(reg::APIC_BASE, val);
@@ -54,10 +55,10 @@ pub fn init() {
     write(reg::SIV, (1 << 8) | 0xFF);
 
     calibrate_timer();
-    arm(3_000_000_000, 0x69);
+    arm(250_000_000, 0xFF);
 }
 
-fn arm(ns: usize, vector: u8) {
+pub fn arm(ns: usize, vector: u8) {
     write(reg::TIC, 0);
     write(reg::LVT, vector as u32);
     write(

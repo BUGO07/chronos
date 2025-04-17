@@ -9,8 +9,6 @@ use alloc::sync::Arc;
 
 use crate::{info, memory::get_hhdm_offset};
 
-const MSR_KVM_SYSTEM_TIME_NEW: u32 = 0x4b564d01;
-
 lazy_static::lazy_static! {
     static ref KVM_TIMER: Arc<PvClockVcpuTimeInfo> = Arc::new(PvClockVcpuTimeInfo::default());
 }
@@ -34,7 +32,7 @@ pub fn init() {
     let is_supported = supported();
     info!("kvm clock supported: {}", is_supported);
     if is_supported {
-        crate::arch::system::cpu::write_msr(0x4B564D01, (ptr - get_hhdm_offset()) | 1);
+        crate::arch::system::cpu::write_msr(0x4b564d01, (ptr - get_hhdm_offset()) | 1);
         unsafe { OFFSET = time_ns() - (crate::task::timer::current_ticks() / 1_000_000) };
     }
 }
