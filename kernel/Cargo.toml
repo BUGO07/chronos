@@ -12,7 +12,7 @@ strip = true
 lto = "fat"
 
 [dependencies]
-flanterm = { path = "../flanterm-rs" }
+flanterm = { git = "https://github.com/BUGO07/flanterm-rs" }
 limine = "0.4"
 tomling = { version = "0.2.0", default-features = false }
 conquer-once = { version = "0.4.0", default-features = false }

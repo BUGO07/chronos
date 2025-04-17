@@ -80,6 +80,7 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 [[package]]
 name = "flanterm"
 version = "0.0.2"
+source = "git+https://github.com/BUGO07/flanterm-rs#50a5930551c1f56549773352905f2cc62f3c0aee"
 dependencies = [
  "cc",
  "limone",

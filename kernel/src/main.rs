@@ -103,7 +103,7 @@ unsafe extern "C" fn kmain() -> ! {
 
     // crate::arch::shell::run_command("clear", Vec::new());
 
-    info!("cpu freq - {}", crate::arch::system::cpuid::get_freq());
+    // info!("cpu freq - {}", crate::arch::system::cpuid::get_freq());
 
     let mut executor = Executor::new();
     executor.spawn(Task::new(crate::task::keyboard::handle_keypresses()));
