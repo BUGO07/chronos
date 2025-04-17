@@ -5,7 +5,9 @@
 
 use x86_64::instructions::port::Port;
 
+pub mod config;
 pub mod logger;
+pub mod memcmp;
 pub mod term;
 pub mod time;
 

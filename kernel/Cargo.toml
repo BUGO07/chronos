@@ -4,9 +4,17 @@ version = "0.1.0"
 authors = ["bugo07"]
 edition = "2024"
 
+[profile.smol]
+inherits = "release"
+opt-level = "s"
+codegen-units = 1
+strip = true
+lto = "fat"
+
 [dependencies]
-flanterm_bindings = "1.1.4"
+flanterm = { path = "../flanterm-rs" }
 limine = "0.4"
+tomling = { version = "0.2.0", default-features = false }
 conquer-once = { version = "0.4.0", default-features = false }
 crossbeam-queue = { version = "0.3.12", default-features = false, features = ["alloc"] }
 futures-util = { version = "0.3.31", default-features = false, features = ["alloc"] }
@@ -15,6 +23,7 @@ pc-keyboard = "0.8.0"
 spin = "0.10.0"
 x86_64 = "0.15.2"
 talc = "4.4.2"
+mmio = "2.1.0"
 
 [features]
 # default = ["tests"]

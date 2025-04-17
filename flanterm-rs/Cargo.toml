@@ -1,0 +1,28 @@
+[package]
+name = "flanterm"
+version = "0.0.2"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Matilde Morrone <contact@morrone.dev>"]
+description = "Bindings to flanterm terminal"
+readme = "README.md"
+documentation = "https://docs.rs/flanterm"
+repository = "https://github.com/morr0ne/flanterm"
+include = [
+    "src/**/*.rs",
+    "README.md",
+    "LICENSE",
+    "build.rs",
+    "flanterm/*",
+    "!flanterm/.gitignore",
+    "!flanterm/README.md",
+]
+
+[dependencies]
+limone = "0.0.5"
+
+[build-dependencies]
+cc = "1.2.19"
+
+[patch.crates-io]
+limone = { git = "https://github.com/piuma-os/limone" }
