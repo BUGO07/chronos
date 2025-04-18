@@ -9,7 +9,7 @@ use core::{
     task::{Context, Poll, Waker},
 };
 
-use alloc::vec::Vec;
+use alloc::{format, string::String, vec::Vec};
 use spin::Mutex;
 
 static TICKS: AtomicU64 = AtomicU64::new(0);
@@ -21,6 +21,30 @@ pub fn tick_timer() {
 
 pub fn current_ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
+}
+
+pub fn pit_time_pretty(digits: u32) -> String {
+    let elapsed_ns = current_ticks() * 1_000_000;
+    let subsecond_ns = elapsed_ns % 1_000_000_000;
+
+    let divisor = 10u64.pow(9 - digits);
+    let subsecond = subsecond_ns / divisor;
+
+    let elapsed_ms = elapsed_ns / 1_000_000;
+    let seconds_total = elapsed_ms / 1000;
+    let seconds = seconds_total % 60;
+    let minutes_total = seconds_total / 60;
+    let minutes = minutes_total % 60;
+    let hours = minutes_total / 60;
+
+    format!(
+        "{:02}:{:02}:{:02}.{:0width$}",
+        hours,
+        minutes,
+        seconds,
+        subsecond,
+        width = digits as usize
+    )
 }
 
 pub struct TimerFuture {

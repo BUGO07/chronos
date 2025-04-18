@@ -4,16 +4,15 @@
 */
 
 use crate::{
-    arch::{drivers::pic, gdt},
+    arch::{drivers::mouse::mouse_interrupt_handler, gdt},
     halt_loop, info, print, println,
 };
-use lazy_static::lazy_static;
 use x86_64::{
     instructions::port::Port,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
         idt.breakpoint.set_handler_fn(breakpoint_handler);
@@ -26,6 +25,7 @@ lazy_static! {
             .set_handler_fn(general_protection_fault_handler);
         idt[0x20].set_handler_fn(timer_interrupt_handler);
         idt[0x21].set_handler_fn(keyboard_interrupt_handler);
+        idt[0x2c].set_handler_fn(mouse_interrupt_handler);
         idt[0xFF].set_handler_fn(lapic_oneshot_timer_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt
@@ -55,7 +55,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     let mut port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
     crate::task::keyboard::add_scancode(scancode);
-    pic::send_eoi();
+    crate::arch::drivers::pic::send_eoi();
 }
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {

@@ -24,7 +24,7 @@ use crate::{
     utils::halt_loop,
 };
 
-use alloc::{string::ToString, vec::Vec};
+use alloc::vec::Vec;
 use core::panic::PanicInfo;
 use limine::{
     BaseRevision,
@@ -66,11 +66,12 @@ unsafe extern "C" fn kmain() -> ! {
     crate::memory::init();
     crate::arch::gdt::init();
     crate::arch::interrupts::init_idt();
+    crate::arch::drivers::mouse::init();
     crate::arch::drivers::pic::init();
     crate::arch::drivers::time::init();
 
     println!();
-    print_fill!("~");
+    print_fill!("-");
     println!();
 
     info!("up and running");
@@ -96,7 +97,11 @@ unsafe extern "C" fn kmain() -> ! {
         .with_timezone_offset(config.time.zone_offset as i16)
         .adjusted_for_timezone();
 
-    info!("{} | {}", rtc_time.pretty_time(), rtc_time.pretty_zone());
+    info!(
+        "{} | {}",
+        rtc_time.datetime_pretty(),
+        rtc_time.timezone_pretty()
+    );
 
     #[cfg(feature = "tests")]
     tests::init();
@@ -114,9 +119,9 @@ unsafe extern "C" fn kmain() -> ! {
         }
         info!("rocking a {}", crate::arch::system::cpuid::get_cpu());
         info!(
-            "cpu frequency - {}.{}GHz",
+            "cpu frequency - {}.{:03}GHz",
             cpu_freq / 1_000_000_000,
-            (cpu_freq % 1_000_000_000).to_string()[..2].to_string(),
+            (cpu_freq % 1_000_000_000) / 1_000_000,
         );
     }));
     executor.run();

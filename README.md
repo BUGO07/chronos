@@ -13,10 +13,11 @@ Contributors are welcome.
 - Basic Logger
 - Serial
 - Interrupts
+- PIT + TSC + KVM + HPET + LAPIC
+- RTC
 - Memory Management
 - PS/2 Keyboard
-- PIT + TSC + KVM + LAPIC
-- RTC
+- PS/2 Mouse
 - Async Task Executor
 - Basic Shell (i know its not supposed to be there, its temporary)
 

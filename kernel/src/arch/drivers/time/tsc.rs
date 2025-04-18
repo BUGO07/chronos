@@ -28,20 +28,31 @@ impl TscTimer {
     }
 
     pub fn elapsed_ns(&self) -> u64 {
-        self.elapsed_cycles() * 1_000_000_000 / unsafe { crate::CPU_FREQ }
+        (self.elapsed_cycles() as u128 * 1_000_000_000 / unsafe { crate::CPU_FREQ as u128 }) as u64 // u128s because it overflowed once
     }
 
-    pub fn elapsed_pretty(&self) -> String {
-        unsafe {
-            let cycles = self.elapsed_cycles();
-            let freq = crate::CPU_FREQ;
-            let seconds = cycles / freq;
-            let millis = (cycles % freq) * 1_000 / freq;
-            let hours = seconds / 3600;
-            let minutes = (seconds % 3600) / 60;
-            let seconds = seconds % 60;
-            format!("{:02}:{:02}:{:02}.{:03}", hours, minutes, seconds, millis)
-        }
+    pub fn elapsed_pretty(&self, digits: u32) -> String {
+        let elapsed_ns = self.elapsed_ns();
+        let subsecond_ns = elapsed_ns % 1_000_000_000;
+
+        let divisor = 10u64.pow(9 - digits);
+        let subsecond = subsecond_ns / divisor;
+
+        let elapsed_ms = elapsed_ns / 1_000_000;
+        let seconds_total = elapsed_ms / 1000;
+        let seconds = seconds_total % 60;
+        let minutes_total = seconds_total / 60;
+        let minutes = minutes_total % 60;
+        let hours = minutes_total / 60;
+
+        format!(
+            "{:02}:{:02}:{:02}.{:0width$}",
+            hours,
+            minutes,
+            seconds,
+            subsecond,
+            width = digits as usize
+        )
     }
 }
 

@@ -3,7 +3,6 @@
     Released under EUPL 1.2 License
 */
 
-use lazy_static::lazy_static;
 use x86_64::{
     VirtAddr,
     instructions::tables::load_tss,
@@ -24,7 +23,7 @@ struct Selectors {
     tss_selector: SegmentSelector,
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref GDT: (GlobalDescriptorTable, Selectors) = {
         let mut gdt = GlobalDescriptorTable::new();
         let code_selector = gdt.append(Descriptor::kernel_code_segment());
@@ -39,9 +38,7 @@ lazy_static! {
             },
         )
     };
-}
 
-lazy_static! {
     static ref TSS: TaskStateSegment = {
         let mut tss = TaskStateSegment::new();
         tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
