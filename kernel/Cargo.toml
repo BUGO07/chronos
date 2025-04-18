@@ -24,6 +24,7 @@ spin = "0.10.0"
 x86_64 = "0.15.2"
 talc = "4.4.2"
 mmio = "2.1.0"
+ps2-mouse = "0.1.4"
 
 [features]
 # default = ["tests"]

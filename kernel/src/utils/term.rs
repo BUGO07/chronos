@@ -11,12 +11,11 @@ use core::{
     fmt::{self, Write},
     ptr::null_mut,
 };
-use lazy_static::lazy_static;
 use limine::request::FramebufferRequest;
 use spin::Mutex;
 use x86_64::instructions::interrupts;
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub static ref WRITERS: Mutex<Vec<Writer>> = Mutex::new(Writer::new());
 }
 
@@ -172,21 +171,22 @@ pub fn _print_fill(what: &str, with: &str) {
     if unsafe { FINISHED_INIT } {
         interrupts::without_interrupts(|| {
             for (i, writer) in WRITERS.lock().iter_mut().enumerate() {
-                let fbw = get_framebuffers().nth(i).unwrap().width() as usize;
+                let width = get_framebuffers().nth(i).unwrap().width() as usize;
+                let cols = (width - 2 * MARGIN) / (1 + FONT_WIDTH * FONT_SCALE_X);
                 if with.is_empty() {
                     writer
-                        .write_fmt(format_args!(
-                            "{}\n",
-                            what.repeat(fbw / (FONT_WIDTH * FONT_SCALE_X) - MARGIN * 2)
-                        ))
+                        .write_fmt(format_args!("{}\n", what.repeat(cols)))
                         .expect("Printing failed");
                 } else {
-                    let x = what.repeat(
-                        fbw / (FONT_WIDTH * FONT_SCALE_X * 2)
-                            - (MARGIN + with.len() / 2 + 1 + with.len() % 2),
-                    );
+                    let x = what.repeat(cols / 2 - with.len() / 2 - 1);
                     writer
-                        .write_fmt(format_args!("{} {} {}\n", x, with, x))
+                        .write_fmt(format_args!(
+                            "{} {} {}{}\n",
+                            x,
+                            with,
+                            x,
+                            if cols % 2 == 1 { what } else { "" }
+                        ))
                         .expect("Printing failed");
                 };
             }

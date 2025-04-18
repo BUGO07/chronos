@@ -20,13 +20,13 @@ impl RtcTime {
     pub fn current() -> Self {
         read_rtc()
     }
-    pub fn pretty_time(&self) -> String {
+    pub fn datetime_pretty(&self) -> String {
         format!(
             "{}-{:02}-{:02} {:02}:{:02}:{:02}",
             self.year, self.month, self.day, self.hour, self.minute, self.second
         )
     }
-    pub fn pretty_zone(&self) -> String {
+    pub fn timezone_pretty(&self) -> String {
         format!(
             "UTC{}{}:{:02}",
             if self.timezone_offset_minutes > 0 {

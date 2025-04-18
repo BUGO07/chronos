@@ -3,5 +3,6 @@
     Released under EUPL 1.2 License
 */
 
+pub mod mouse;
 pub mod pic;
 pub mod time;

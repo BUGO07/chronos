@@ -89,7 +89,11 @@ fn calibrate_timer() {
     }
     unsafe {
         LAPIC_FREQUENCY = freq / times;
-        debug!("lapic frequency - {}", LAPIC_FREQUENCY);
+        debug!(
+            "lapic frequency - {}.{:03}MHz",
+            LAPIC_FREQUENCY / 1_000_000,
+            (LAPIC_FREQUENCY % 1_000_000) / 1_000,
+        );
     };
 }
 

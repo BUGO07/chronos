@@ -3,18 +3,15 @@
     Released under EUPL 1.2 License
 */
 
-use alloc::{format, string::String, vec::Vec};
-use lazy_static::lazy_static;
+use alloc::{string::String, vec::Vec};
 use pc_keyboard::{DecodedKey, KeyCode};
 use spin::Mutex;
 
-use crate::{print, println, task::keyboard::ScancodeStream};
+use crate::{arch::drivers::time, print, println, task::keyboard::ScancodeStream};
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub static ref SHELL: Mutex<Shell> = Mutex::new(Shell::new());
-}
 
-lazy_static! {
     static ref invis: Vec<u8> = (0u8..=255)
         .filter(|&b| {
             match b {
@@ -153,30 +150,13 @@ pub fn run_command(cmd: &str, args: Vec<&str>) {
             )
         }
         "time" => {
-            let tsc = crate::arch::drivers::time::tsc::TSC_TIMER
-                .lock()
-                .elapsed_pretty();
-            let millis = crate::task::timer::current_ticks();
-            let hours = millis / 3_600_000;
-            let minutes = (millis % 3_600_000) / 60_000;
-            let seconds = (millis % 60_000) / 1000;
-            let millis = millis % 1000;
-            let pit = format!("{:02}:{:02}:{:02}.{:03}", hours, minutes, seconds, millis);
-
-            let kvm_nanoseconds = crate::arch::drivers::time::kvm::time_ns();
-            let kvm_millis = kvm_nanoseconds / 1_000_000;
-            let kvm_seconds = kvm_millis / 1000;
-            let kvm = format!(
-                "{:02}:{:02}:{:02}.{:03}",
-                kvm_seconds / 3600,
-                (kvm_seconds % 3600) / 60,
-                kvm_seconds % 60,
-                kvm_millis % 1000
-            );
-
-            println!("TSC - {}", tsc);
-            println!("KVM - {}", kvm);
-            println!("PIT - {}", pit);
+            println!("PIT - {}", crate::task::timer::pit_time_pretty(5));
+            println!("TSC - {}", time::tsc::TSC_TIMER.lock().elapsed_pretty(5));
+            let kvm = time::kvm::KVM_TIMER.lock();
+            if kvm.is_supported() {
+                println!("KVM - {}", kvm.elapsed_pretty(5));
+            }
+            println!("HPET- {}", time::hpet::HPET_TIMER.lock().elapsed_pretty(5));
         }
         "date" => {
             let config = crate::utils::config::get_config();
@@ -184,7 +164,7 @@ pub fn run_command(cmd: &str, args: Vec<&str>) {
             let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
                 .with_timezone_offset(config.time.zone_offset as i16)
                 .adjusted_for_timezone()
-                .pretty_time();
+                .datetime_pretty();
             println!("{}", rtc_time)
         }
         "clear" => {

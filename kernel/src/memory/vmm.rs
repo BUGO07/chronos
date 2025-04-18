@@ -5,7 +5,6 @@
 
 use core::{alloc::Layout, arch::asm};
 
-use lazy_static::lazy_static;
 use limine::{
     memory_map::EntryType,
     request::{ExecutableAddressRequest, ExecutableFileRequest},
@@ -31,7 +30,7 @@ pub mod flag {
     pub const NO_EXEC: u64 = 1 << 63;
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub static ref PAGEMAP: Mutex<Pagemap> = Mutex::new(Pagemap::new());
 }
 
