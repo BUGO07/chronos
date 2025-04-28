@@ -6,7 +6,7 @@ edition = "2024"
 
 [profile.smol]
 inherits = "release"
-opt-level = 2
+opt-level = "z"
 codegen-units = 1
 strip = true
 lto = "fat"
