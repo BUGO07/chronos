@@ -33,9 +33,10 @@ Contributors are welcome.
 ## Known Bugs/Issues
 
 - Sometimes address overflow in vmm on real hardware in debug builds.
-- Reboot causes a pagefault after booting.
+- Reboot causes a pagefault after booting in debug builds.
+- Double fault on my laptop when booting for unknown reason.
 - No way to wake up from sleep yet.
-- Opt-level 2 and 3 cause a bootloop
+- Opt-level 2 and 3 cause a bootloop.
 
 ## Building And Running
 
