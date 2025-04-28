@@ -35,6 +35,7 @@ Contributors are welcome.
 - Sometimes address overflow in vmm on real hardware in debug builds.
 - Reboot causes a pagefault after booting.
 - No way to wake up from sleep yet.
+- Opt-level 2 and 3 cause a bootloop
 
 ## Building And Running
 
