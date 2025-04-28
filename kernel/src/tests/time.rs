@@ -3,12 +3,12 @@
     Released under EUPL 1.2 License
 */
 
-use crate::{arch::drivers::time::pit::current_pic_ticks, print};
+use crate::{arch::drivers::time::pit::current_pit_ticks, print};
 
 pub fn pit_timer() {
-    let time = current_pic_ticks();
+    let time = current_pit_ticks();
     loop {
-        if time + 200 < current_pic_ticks() {
+        if time + 200 < current_pit_ticks() {
             break;
         }
     }
