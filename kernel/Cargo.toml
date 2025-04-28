@@ -6,13 +6,12 @@ edition = "2024"
 
 [profile.smol]
 inherits = "release"
-opt-level = "s"
+opt-level = 2
 codegen-units = 1
 strip = true
 lto = "fat"
 
 [dependencies]
-flanterm = { git = "https://github.com/BUGO07/flanterm-rs" }
 limine = "0.4"
 tomling = { version = "0.2.0", default-features = false }
 conquer-once = { version = "0.4.0", default-features = false }
@@ -25,7 +24,9 @@ x86_64 = "0.15.2"
 talc = "4.4.2"
 mmio = "2.1.0"
 ps2-mouse = "0.1.4"
+uacpi-sys = { path = "../bindings/uacpi-sys" }
+flanterm-sys = { path = "../bindings/flanterm-sys" }
 
 [features]
-# default = ["tests"]
+# default = ["tests"] # to get intelisense on test files
 tests = []

@@ -9,15 +9,19 @@ use core::task::{Context, Poll, Waker};
 use crossbeam_queue::ArrayQueue;
 use x86_64::instructions::interrupts::{self, enable_and_hlt};
 
-pub struct Executor {
+// lazy_static::lazy_static! {
+//     pub static ref SCHEDULER: Mutex<Scheduler>  = Mutex::new(Scheduler::new());
+// }
+
+pub struct Scheduler {
     tasks: BTreeMap<TaskId, Task>,
     task_queue: Arc<ArrayQueue<TaskId>>,
     waker_cache: BTreeMap<TaskId, Waker>,
 }
 
-impl Executor {
+impl Scheduler {
     pub fn new() -> Self {
-        Executor {
+        Scheduler {
             tasks: BTreeMap::new(),
             task_queue: Arc::new(ArrayQueue::new(100)),
             waker_cache: BTreeMap::new(),

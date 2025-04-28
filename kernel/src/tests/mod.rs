@@ -40,7 +40,13 @@ pub fn init() -> ! {
         &memory::many_boxes,
     ]);
     println!("\nTimer tests...");
-    test_runner(&[&time::basic_timer]);
+    test_runner(&[
+        &time::pit_timer,
+        &time::kvm_timer,
+        &time::tsc_timer,
+        &time::hpet_timer,
+        &time::preferred_timer,
+    ]);
     crate::utils::exit_qemu(crate::utils::QemuExitCode::Success);
     halt_loop()
 }

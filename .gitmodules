@@ -1,0 +1,6 @@
+[submodule "bindings/flanterm-sys"]
+	path = bindings/flanterm-sys
+	url = https://github.com/BUGO07/flanterm-sys
+[submodule "bindings/uacpi-sys"]
+	path = bindings/uacpi-sys
+	url = https://github.com/BUGO07/uacpi-sys

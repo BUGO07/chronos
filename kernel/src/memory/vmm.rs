@@ -143,7 +143,7 @@ fn get_next_level(top_level: *mut Table, idx: u64, allocate: bool) -> *mut Table
 pub fn init() {
     let mem_map = super::get_mem_map();
     let hhdm_offset = super::get_hhdm_offset();
-    info!("setting up the kernel pagemap");
+    info!("setting up the kernel pagemap...");
     debug!("hhdm offset is: 0x{:X}", hhdm_offset);
 
     let mut pmap = PAGEMAP.lock();

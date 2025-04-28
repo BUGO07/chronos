@@ -18,18 +18,18 @@ pub mod tests;
 
 extern crate alloc;
 
-use crate::{
-    arch::drivers::time::tsc::measure_cpu_frequency,
-    task::{Task, executor::Executor},
-    utils::halt_loop,
-};
+use crate::{arch::drivers::time::tsc::measure_cpu_frequency, task::Task, utils::halt_loop};
 
-use alloc::vec::Vec;
-use core::panic::PanicInfo;
+use alloc::{string::ToString, vec::Vec};
+use core::{
+    panic::PanicInfo,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use limine::{
     BaseRevision,
     request::{RequestsEndMarker, RequestsStartMarker},
 };
+use task::scheduler::Scheduler;
 
 const NOOO: &str = include_str!("../res/nooo.txt");
 
@@ -45,45 +45,43 @@ static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 #[unsafe(link_section = ".requests_end_marker")]
 static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
-// #[used]
-// #[unsafe(link_section = ".requests")]
-// static BOOT_DATE: DateAtBootRequest = DateAtBootRequest::new();
+pub static mut CPU_FREQ: AtomicU64 = AtomicU64::new(0);
 
-// #[used]
-// #[unsafe(link_section = ".requests")]
-// static MP_REQUEST: MpRequest = MpRequest::new();
-
-pub static mut CPU_FREQ: u64 = 0;
+#[cfg(debug_assertions)]
+#[repr(C)]
+struct StackFrame {
+    rbp: *const StackFrame,
+    rip: usize,
+}
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
     assert!(BASE_REVISION.is_supported());
 
     println!("\n{NOOO}\n");
-
     info!("x86_64 kernel starting...\n");
 
     crate::memory::init();
     crate::arch::gdt::init();
     crate::arch::interrupts::init_idt();
-    crate::arch::drivers::mouse::init();
-    crate::arch::drivers::pic::init();
+    crate::arch::interrupts::pic::init();
+    crate::arch::interrupts::pic::unmask_all(); // limine masks all IRQs by default // todo: fix ts
+
+    debug!("enabling interrupts (sti)");
+    x86_64::instructions::interrupts::enable();
+
+    crate::arch::drivers::time::early_init();
+
+    crate::arch::drivers::acpi::init();
     crate::arch::drivers::time::init();
+    crate::arch::drivers::keyboard::init();
+    crate::arch::drivers::mouse::init();
 
     println!();
     print_fill!("-");
     println!();
 
     info!("up and running");
-
-    // let cpus = MP_REQUEST.get_response().unwrap().cpus();
-    // info!("Found {} cpus", cpus.len());
-    // for cpu in cpus {
-    //     info!(
-    //         "cpu {}: lapic id - {}, extra - 0x{:X} ",
-    //         cpu.id, cpu.lapic_id, cpu.extra
-    //     );
-    // }
 
     let framebuffers = crate::utils::term::get_framebuffers().collect::<Vec<_>>();
     info!("found {} displays:", framebuffers.len());
@@ -110,12 +108,21 @@ unsafe extern "C" fn kmain() -> ! {
 
     // info!("cpu freq - {}", crate::arch::system::cpuid::get_freq());
 
-    let mut executor = Executor::new();
-    executor.spawn(Task::new(crate::task::keyboard::handle_keypresses()));
-    executor.spawn(Task::new(async move {
+    let mut scheduler = Scheduler::new();
+    scheduler.spawn(Task::new(
+        crate::arch::drivers::keyboard::handle_keypresses(),
+    ));
+    scheduler.spawn(Task::new(async move {
         let cpu_freq = measure_cpu_frequency().await;
+        if cpu_freq == 0 {
+            panic!("failed to measure cpu frequency");
+        }
         unsafe {
-            CPU_FREQ = cpu_freq;
+            CPU_FREQ.store(cpu_freq, Ordering::Relaxed);
+            crate::arch::drivers::time::tsc::TSC_TIMER
+                .get_mut()
+                .unwrap()
+                .set_supported(true);
         }
         info!("rocking a {}", crate::arch::system::cpuid::get_cpu());
         info!(
@@ -123,9 +130,22 @@ unsafe extern "C" fn kmain() -> ! {
             cpu_freq / 1_000_000_000,
             (cpu_freq % 1_000_000_000) / 1_000_000,
         );
+
+        // for now
+        print!("$ ");
     }));
-    executor.run();
+    scheduler.run();
+    // loop {}
 }
+
+// async fn simple_task() {
+//     for i in 0..5 {
+//         info!("Task running iteration: {}", i);
+
+//         crate::arch::drivers::time::TimerFuture::new(10).await;
+//     }
+//     info!("Task completed!");
+// }
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -140,34 +160,55 @@ fn panic(info: &PanicInfo) -> ! {
         println!("\n{}{NOOO}\n", crate::utils::logger::color::RED);
         print_fill!("~", "Kernel Panic");
         println!("~");
+        // unnecessary but might change in the future
+        let msg = info.message().to_string();
         if let Some(location) = info.location() {
             println!(
-                "~    ERROR: panicked at {}:{}:{} with message: {}\n~    ",
+                "~\tERROR: panicked at {}:{}:{} {}{}\n~\t",
                 location.file(),
                 location.line(),
                 location.column(),
-                info.message(),
+                if msg.is_empty() {
+                    "without a message."
+                } else {
+                    "with message: "
+                },
+                msg,
             );
         } else {
-            println!(
-                "~    ERROR: panicked with message: {}\n~    ",
-                info.message(),
-            );
+            println!("~\tERROR: panicked with message: {}\n~\t", info.message(),);
         }
-        println!("~    stopping code execution and dumping registers\n~    ");
+        #[cfg(debug_assertions)]
+        {
+            let mut rbp: *const StackFrame;
+            unsafe {
+                core::arch::asm!("mov {}, rbp", out(reg) rbp);
+            }
+            let mut i = 0;
+            while let Some(frame) = unsafe { rbp.as_ref() } {
+                println!("~\tframe {}: rip = {:#x}", i, frame.rip);
+                rbp = frame.rbp;
+                i += 1;
+
+                if i > 64 {
+                    break;
+                }
+            }
+        }
+        println!("~\tstopping code execution and dumping registers\n~\t");
         let registers = crate::arch::system::cpu::read_registers();
         println!(
-            "~    r15:    0x{0:016X}  -  rsi:    0x{10:016X}\n\
-             ~    r14:    0x{1:016X}  -  rdx:    0x{11:016X}\n\
-             ~    r13:    0x{2:016X}  -  rcx:    0x{12:016X}\n\
-             ~    r12:    0x{3:016X}  -  rbx:    0x{13:016X}\n\
-             ~    r11:    0x{4:016X}  -  rax:    0x{14:016X}\n\
-             ~    r10:    0x{5:016X}  -  rip:    0x{15:016X}\n\
-             ~    r9:     0x{6:016X}  -  cs:     0x{16:016X}\n\
-             ~    r8:     0x{7:016X}  -  rflags: 0x{17:016X}\n\
-             ~    rbp:    0x{8:016X}  -  rsp:    0x{18:016X}\n\
-             ~    rdi:    0x{9:016X}  -  ss:     0x{19:016X}\n\
-             ~    cr2:    0x{20:016X}  -  cr3:    0x{21:016X}\n~",
+            "~\tr15:    0x{0:016X}  -  rsi:    0x{10:016X}\n\
+             ~\tr14:    0x{1:016X}  -  rdx:    0x{11:016X}\n\
+             ~\tr13:    0x{2:016X}  -  rcx:    0x{12:016X}\n\
+             ~\tr12:    0x{3:016X}  -  rbx:    0x{13:016X}\n\
+             ~\tr11:    0x{4:016X}  -  rax:    0x{14:016X}\n\
+             ~\tr10:    0x{5:016X}  -  rip:    0x{15:016X}\n\
+             ~\tr9:     0x{6:016X}  -  cs:     0x{16:016X}\n\
+             ~\tr8:     0x{7:016X}  -  rflags: 0x{17:016X}\n\
+             ~\trbp:    0x{8:016X}  -  rsp:    0x{18:016X}\n\
+             ~\trdi:    0x{9:016X}  -  ss:     0x{19:016X}\n\
+             ~\tcr2:    0x{20:016X}  -  cr3:    0x{21:016X}\n~",
             registers.r15,
             registers.r14,
             registers.r13,
