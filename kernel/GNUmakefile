@@ -18,19 +18,21 @@ ifeq ($(RUST_PROFILE),)
 endif
 
 override RUST_PROFILE_SUBDIR := $(RUST_PROFILE)
+override RUST_FLAGS := "-C relocation-model=static"
 ifeq ($(RUST_PROFILE),dev)
     override RUST_PROFILE_SUBDIR := debug
+    override RUST_FLAGS := "-C relocation-model=static -C force-frame-pointers=yes"
 endif
 
 # Default target.
 .PHONY: all
 all:
-	RUSTFLAGS="-C relocation-model=static" cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE)
+	RUSTFLAGS=$(RUST_FLAGS) cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE)
 	cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/$$(cd target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR) && find -maxdepth 1 -perm -111 -type f) chronos
 
 .PHONY: test
 test:
-	RUSTFLAGS="-C relocation-model=static" cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE) --features tests
+	RUSTFLAGS=$(RUST_FLAGS) cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE) --features tests
 	cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/$$(cd target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR) && find -maxdepth 1 -perm -111 -type f) chronos_test
 
 # Remove object files and the final executable.

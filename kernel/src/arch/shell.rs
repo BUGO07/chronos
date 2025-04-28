@@ -3,16 +3,23 @@
     Released under EUPL 1.2 License
 */
 
-use alloc::{string::String, vec::Vec};
+use core::sync::atomic::Ordering;
+
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use pc_keyboard::{DecodedKey, KeyCode};
 use spin::Mutex;
 
-use crate::{arch::drivers::time, print, println, task::keyboard::ScancodeStream};
+use crate::{arch::drivers::time, print, print_fill, println, utils::logger::color};
+
+use super::drivers::keyboard::ScancodeStream;
 
 lazy_static::lazy_static! {
     pub static ref SHELL: Mutex<Shell> = Mutex::new(Shell::new());
 
-    static ref invis: Vec<u8> = (0u8..=255)
+    pub static ref INVISIBLE_CHARS: Vec<u8> = (0u8..=255)
         .filter(|&b| {
             match b {
                 0x00..=0x1F | 0x7F => true,
@@ -27,6 +34,8 @@ pub struct Shell {
     input: Vec<u8>,
     last_commands: Vec<String>,
     prev_commands: Vec<String>,
+    color_fg: String,
+    color_bg: String,
 }
 
 impl Shell {
@@ -35,26 +44,31 @@ impl Shell {
             input: Vec::new(),
             last_commands: Vec::new(),
             prev_commands: Vec::new(),
+            color_fg: color::RESET.to_string(),
+            color_bg: color::RESET.to_string(),
         }
     }
 
     pub fn key_event(&mut self, dc: DecodedKey, scancodes: &ScancodeStream) {
-        if alloc::vec![KeyCode::LControl, KeyCode::C]
-            .iter()
-            .all(|x: &KeyCode| scancodes.keys_down.contains(x))
-        {
-            print!("^C\n$ ");
-            self.input.clear();
-            return;
+        match scancodes.keys_down.as_slice() {
+            [KeyCode::LControl, KeyCode::C] => {
+                print!("^C\n$ ");
+                self.input.clear();
+                return;
+            }
+            _ => {}
         }
         match dc {
             DecodedKey::Unicode(character) => {
+                // backspace
                 if character == '\u{8}' {
                     if self.input.len() > 0 {
                         print!("\x08 \x08");
                         self.input.pop();
                     }
-                } else if character == '\n' || character == '\r' {
+                }
+                // enter
+                else if character == '\n' || character == '\r' {
                     println!();
                     let raw_input = core::str::from_utf8(&self.input).unwrap().trim().replace(
                         "!!",
@@ -66,13 +80,17 @@ impl Shell {
                     let mut split_input = raw_input.split(" ");
                     let cmd = split_input.next().unwrap();
                     let args = Vec::from_iter(split_input.into_iter());
-                    run_command(cmd, args);
+                    run_command(cmd, args, self);
+                    self.prev_commands.reverse();
+                    self.last_commands.append(&mut self.prev_commands);
                     if !raw_input.is_empty() {
                         self.last_commands.push(raw_input);
                     }
                     print!("$ ");
                     self.input.clear();
-                } else if !invis.contains(&(character as u8)) {
+                }
+                // del, esc, tab, etc
+                else if !INVISIBLE_CHARS.contains(&(character as u8)) {
                     self.input.push(character as u8);
                     print!("{}", character);
                 }
@@ -80,16 +98,7 @@ impl Shell {
             DecodedKey::RawKey(key) => match key {
                 KeyCode::ArrowUp => {
                     if self.last_commands.len() > 0 {
-                        print!(
-                            "{}",
-                            "\x08 \x08".repeat(
-                                crate::utils::term::get_framebuffers()
-                                    .next()
-                                    .unwrap()
-                                    .width() as usize
-                                    / 8
-                            )
-                        );
+                        print_fill!("\x08 \x08", "", false);
                         if self.input.len() > 0 {
                             self.prev_commands
                                 .push(String::from_utf8(self.input.clone()).unwrap());
@@ -101,16 +110,7 @@ impl Shell {
                     }
                 }
                 KeyCode::ArrowDown => {
-                    print!(
-                        "{}",
-                        "\x08 \x08".repeat(
-                            crate::utils::term::get_framebuffers()
-                                .next()
-                                .unwrap()
-                                .width() as usize
-                                / 8
-                        )
-                    );
+                    print_fill!("\x08 \x08", "", false);
                     if self.input.len() > 0 {
                         self.last_commands
                             .push(String::from_utf8(self.input.clone()).unwrap());
@@ -131,44 +131,209 @@ impl Shell {
     }
 }
 
-pub fn run_command(cmd: &str, args: Vec<&str>) {
+pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
     match cmd {
         "help" | "?" => {
             println!(
-                "\nlist of commands:\n\n    \
-            !! - replaced with the last command (like linux)\n    \
-            help (?) - provides help\n    \
-            time - current time given from the PIT\n    \
-            date - current date given from the RTC\n    \
-            clear - clears the screen\n    \
-            echo - echoes the input\n    \
-            nooo - prints nooo\n    \
-            shutdown - shuts down the system\n    \
-            pagefault - pagefaults on purpose\n    \
-            panic - panics on command with the command arguments as the panic info\n    \
+                "\nlist of commands:\n\n\t\
+            !! - replaced with the last command (like linux)\n\t\
+            help (?) - provides help\n\t\
+            time [digits] - current time given from all the timers\n\t\
+            date [timezone] - current date given from the RTC\n\t\
+            clear - clears the screen\n\t\
+            color [x] changes the color of the terminal (like windows or use hex)\n\t\
+            bg [x] changes the background of the terminal (like windows or use hex)\n\t\
+            echo [what] - echoes the input\n\t\
+            nooo - prints nooo\n\t\
+            shutdown - shuts down the system\n\t\
+            reboot - reboots the system\n\t\
+            suspend - suspends the system\n\t\
+            hibernate - hibernates the system\n\t\
+            pagefault - pagefaults on purpose\n\t\
+            panic [message] - panics on command with the command arguments as the panic info\n\t\
             "
             )
         }
         "time" => {
-            println!("PIT - {}", crate::task::timer::pit_time_pretty(5));
-            println!("TSC - {}", time::tsc::TSC_TIMER.lock().elapsed_pretty(5));
-            let kvm = time::kvm::KVM_TIMER.lock();
-            if kvm.is_supported() {
-                println!("KVM - {}", kvm.elapsed_pretty(5));
+            let digits = if args.len() != 0 {
+                args[0].parse().unwrap_or(5).clamp(0, 9)
+            } else {
+                5
+            };
+            println!("PIT - {}", time::pit::elapsed_pretty(digits));
+            if time::TIMERS_INIT_STATE.load(Ordering::Relaxed) >= 4 {
+                unsafe {
+                    let kvm = time::kvm::KVM_TIMER
+                        .get()
+                        .expect("couldn't access kvm timer");
+                    let tsc = time::tsc::TSC_TIMER
+                        .get()
+                        .expect("couldn't access tsc timer");
+                    let hpet = time::hpet::HPET_TIMER
+                        .get()
+                        .expect("couldn't access hpet timer");
+                    if kvm.is_supported() {
+                        println!("KVM - {}", kvm.elapsed_pretty(digits));
+                    }
+                    if tsc.is_supported() {
+                        println!("TSC - {}", tsc.elapsed_pretty(digits));
+                    }
+                    if hpet.is_supported() {
+                        println!("HPET- {}", hpet.elapsed_pretty(digits));
+                    }
+                }
             }
-            println!("HPET- {}", time::hpet::HPET_TIMER.lock().elapsed_pretty(5));
         }
         "date" => {
             let config = crate::utils::config::get_config();
+            let zone = if args.len() == 0 {
+                config.time.zone_offset
+            } else {
+                args[0].parse().unwrap_or(config.time.zone_offset)
+            } as i16;
 
             let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
-                .with_timezone_offset(config.time.zone_offset as i16)
-                .adjusted_for_timezone()
-                .datetime_pretty();
-            println!("{}", rtc_time)
+                .with_timezone_offset(zone)
+                .adjusted_for_timezone();
+            println!(
+                "{} | {}",
+                rtc_time.datetime_pretty(),
+                rtc_time.timezone_pretty()
+            )
         }
         "clear" => {
             print!("\x1b[2J\x1b[H");
+        }
+        "color" => {
+            let fg = if args.len() != 0 {
+                match args[0] {
+                    "0" => color::BLACK.to_string(), // invisible when bg is black :/
+                    "1" => color::BLUE.to_string(),
+                    "2" => color::GREEN.to_string(),
+                    "3" => color::CYAN.to_string(),
+                    "4" => color::RED.to_string(),
+                    "5" => color::PURPLE.to_string(),
+                    "6" => color::YELLOW.to_string(),
+                    "7" => color::WHITE.to_string(),
+                    "8" => color::GRAY.to_string(),
+                    "9" => color::BLUE.to_string(),
+                    //TODO: make lighter variants of the following
+                    "a" => color::LIGHT_GREEN.to_string(),
+                    "b" => color::CYAN.to_string(),
+                    "c" => color::LIGHT_RED.to_string(),
+                    "d" => color::PINK.to_string(),
+                    "e" => color::YELLOW.to_string(),
+                    "f" => color::WHITE_BRIGHT.to_string(),
+                    x => {
+                        let is_valid = |hex: &str| -> bool {
+                            if !hex.starts_with("#") || hex.len() != 7 {
+                                return false;
+                            }
+                            let is_valid_hex = |h: u8| -> bool {
+                                (h >= b'0' && h <= b'9')
+                                    || (h >= b'a' && h <= b'f')
+                                    || (h >= b'A' && h <= b'F')
+                            };
+                            let mut valid = true;
+                            for i in 1..7 {
+                                if !is_valid_hex(hex.as_bytes()[i]) {
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                            return valid;
+                        };
+                        if is_valid(x) {
+                            color::rgb(
+                                x[1..3].as_bytes()[0],
+                                x[3..5].as_bytes()[0],
+                                x[5..7].as_bytes()[0],
+                                false,
+                            )
+                        } else {
+                            color::RESET.to_string()
+                        }
+                    }
+                }
+            } else {
+                color::RESET.to_string()
+            };
+
+            shell.color_fg = fg;
+
+            let mut bg = shell.color_bg.as_str();
+
+            if bg == color::RESET {
+                bg = "";
+            }
+
+            println!("{}{}", shell.color_fg, bg);
+        }
+        "bg" => {
+            // repeated code ik
+            let bg = if args.len() != 0 {
+                match args[0] {
+                    "0" => color::BLACK_BG.to_string(),
+                    "1" => color::BLUE_BG.to_string(),
+                    "2" => color::GREEN_BG.to_string(),
+                    "3" => color::CYAN_BG.to_string(),
+                    "4" => color::RED_BG.to_string(),
+                    "5" => color::PURPLE_BG.to_string(),
+                    "6" => color::YELLOW_BG.to_string(),
+                    "7" => color::WHITE_BG.to_string(),
+                    "8" => color::GRAY_BG.to_string(),
+                    "9" => color::BLUE_BG.to_string(),
+                    //TODO: make lighter variants of the following
+                    "a" => color::LIGHT_GREEN_BG.to_string(),
+                    "b" => color::CYAN_BG.to_string(),
+                    "c" => color::LIGHT_RED_BG.to_string(),
+                    "d" => color::PINK_BG.to_string(),
+                    "e" => color::YELLOW_BG.to_string(),
+                    "f" => color::WHITE_BRIGHT_BG.to_string(),
+                    x => {
+                        let is_valid = |hex: &str| -> bool {
+                            if !hex.starts_with("#") || hex.len() != 7 {
+                                return false;
+                            }
+                            let is_valid_hex = |h: u8| -> bool {
+                                (h >= b'0' && h <= b'9')
+                                    || (h >= b'a' && h <= b'f')
+                                    || (h >= b'A' && h <= b'F')
+                            };
+                            let mut valid = true;
+                            for i in 1..7 {
+                                if !is_valid_hex(hex.as_bytes()[i]) {
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                            return valid;
+                        };
+                        if is_valid(x) {
+                            color::rgb(
+                                x[1..3].as_bytes()[0],
+                                x[3..5].as_bytes()[0],
+                                x[5..7].as_bytes()[0],
+                                true,
+                            )
+                        } else {
+                            color::RESET.to_string()
+                        }
+                    }
+                }
+            } else {
+                color::RESET.to_string()
+            };
+
+            shell.color_bg = bg;
+
+            let mut fg = shell.color_fg.as_str();
+
+            if fg == color::RESET {
+                fg = "";
+            }
+
+            println!("{}{}", shell.color_bg, fg);
         }
         "echo" => {
             println!("{}", args.join(" "));
@@ -177,19 +342,25 @@ pub fn run_command(cmd: &str, args: Vec<&str>) {
             println!("\n{}\n", crate::NOOO);
         }
         "shutdown" => {
-            println!("shutting down");
-            // exits qemu for now
-            crate::utils::exit_qemu(crate::utils::QemuExitCode::Success);
+            crate::arch::drivers::acpi::perform_power_action(
+                super::drivers::acpi::PowerAction::Shutdown,
+            );
+        }
+        "reboot" => {
+            crate::arch::drivers::acpi::perform_power_action(
+                super::drivers::acpi::PowerAction::Reboot,
+            );
+        }
+        "sleep" => {
+            crate::arch::drivers::acpi::perform_power_action(
+                super::drivers::acpi::PowerAction::Sleep,
+            );
         }
         "pagefault" => {
             unsafe { *(0xdeadbeef as *mut u8) = 42 };
         }
         "panic" => {
             panic!("{}", args.join(" ").as_str());
-        }
-        "x" => {
-            let tsc = unsafe { core::arch::x86_64::_rdtsc() };
-            println!("tsc: {tsc}");
         }
         "" => {}
         x => {

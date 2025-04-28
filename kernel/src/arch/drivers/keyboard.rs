@@ -3,7 +3,7 @@
     Released under EUPL 1.2 License
 */
 
-use crate::warn;
+use crate::{arch::interrupts::IDT, debug, info, warn};
 use alloc::vec::Vec;
 use conquer_once::spin::OnceCell;
 use core::{
@@ -16,21 +16,10 @@ use futures_util::{
     task::AtomicWaker,
 };
 use pc_keyboard::{HandleControl, KeyCode, Keyboard, ScancodeSet1, layouts};
+use x86_64::{instructions::port::Port, structures::idt::InterruptStackFrame};
 
 static SCANCODE_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();
 static WAKER: AtomicWaker = AtomicWaker::new();
-
-pub fn add_scancode(scancode: u8) {
-    if let Ok(queue) = SCANCODE_QUEUE.try_get() {
-        if let Err(_) = queue.push(scancode) {
-            warn!("scancode queue full; dropping keyboard input");
-        } else {
-            WAKER.wake();
-        }
-    } else {
-        warn!("scancode queue uninitialized");
-    }
-}
 
 pub struct ScancodeStream {
     _private: (),
@@ -69,6 +58,30 @@ impl Stream for ScancodeStream {
                 Poll::Ready(Some(scancode))
             }
             None => Poll::Pending,
+        }
+    }
+}
+
+pub fn init() {
+    // yeah;
+    unsafe {
+        info!("initializing ps/2 keyboard...");
+        IDT[0x21].set_handler_fn(keyboard_interrupt_handler);
+        debug!("done");
+    }
+}
+
+extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    add_scancode(unsafe { Port::new(0x60).read() });
+    crate::arch::interrupts::pic::send_eoi(1);
+}
+
+pub fn add_scancode(scancode: u8) {
+    if let Ok(queue) = SCANCODE_QUEUE.try_get() {
+        if let Err(_) = queue.push(scancode) {
+            warn!("scancode queue full; dropping keyboard input");
+        } else {
+            WAKER.wake();
         }
     }
 }

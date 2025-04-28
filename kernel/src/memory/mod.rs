@@ -3,6 +3,8 @@
     Released under EUPL 1.2 License
 */
 
+use core::sync::atomic::{AtomicU8, Ordering};
+
 use limine::request::{HhdmRequest, MemoryMapRequest};
 use talc::*;
 
@@ -26,12 +28,12 @@ pub static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> = Talc::new(unsafe {
 })
 .lock();
 
-pub static mut FINISHED_INIT: bool = false;
+pub static MEMORY_INIT_STAGE: AtomicU8 = AtomicU8::new(0);
 
 pub fn init() {
-    info!("setting up memory");
+    info!("setting up...");
     {
-        debug!("requesting hhdm and memmap");
+        debug!("requesting hhdm and memmap...");
         let hhdm_offset = get_hhdm_offset();
         let mem_map = get_mem_map();
 
@@ -41,7 +43,7 @@ pub fn init() {
             if entry.entry_type == limine::memory_map::EntryType::USABLE {
                 unsafe {
                     debug!(
-                        "claiming 0x{:X}-0x{:X}",
+                        "claiming 0x{:X}-0x{:X}...",
                         entry.base,
                         entry.base + hhdm_offset
                     );
@@ -55,10 +57,9 @@ pub fn init() {
             }
         }
     }
-    unsafe {
-        FINISHED_INIT = true;
-    }
+    MEMORY_INIT_STAGE.store(1, Ordering::Relaxed);
     vmm::init();
+    MEMORY_INIT_STAGE.store(2, Ordering::Relaxed);
 }
 
 pub fn get_hhdm_offset() -> u64 {

@@ -3,13 +3,14 @@
     Released under EUPL 1.2 License
 */
 
-use crate::{memory::FINISHED_INIT, serial_print};
+use crate::serial_print;
 use alloc::vec::Vec;
 use core::{
     alloc::Layout,
     ffi::c_void,
     fmt::{self, Write},
     ptr::null_mut,
+    sync::atomic::Ordering,
 };
 use limine::request::FramebufferRequest;
 use spin::Mutex;
@@ -20,7 +21,7 @@ lazy_static::lazy_static! {
 }
 
 pub struct Writer {
-    pub ctx: *mut flanterm::sys::flanterm_context,
+    pub ctx: *mut flanterm_sys::flanterm_context,
 }
 
 unsafe impl Send for Writer {}
@@ -29,14 +30,12 @@ unsafe impl Sync for Writer {}
 #[unsafe(link_section = ".requests")]
 static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
 
-unsafe extern "C" fn malloc(x: usize) -> *mut core::ffi::c_void {
-    unsafe { alloc::alloc::alloc(Layout::from_size_align(x, 0x10).unwrap()) as *mut c_void }
+unsafe extern "C" fn malloc(size: usize) -> *mut core::ffi::c_void {
+    unsafe { alloc::alloc::alloc(Layout::from_size_align(size, 0x10).unwrap()) as *mut c_void }
 }
 
-unsafe extern "C" fn free(x: *mut core::ffi::c_void, y: usize) {
-    unsafe {
-        alloc::alloc::dealloc(x as *mut u8, Layout::from_size_align(y, 0x10).unwrap());
-    }
+unsafe extern "C" fn free(ptr: *mut core::ffi::c_void, size: usize) {
+    unsafe { alloc::alloc::dealloc(ptr as *mut u8, Layout::from_size_align(size, 0x10).unwrap()) };
 }
 
 pub fn get_framebuffers()
@@ -82,7 +81,7 @@ impl Writer {
         for framebuffer in get_framebuffers() {
             unsafe {
                 flanterm_contexts.push(Writer {
-                    ctx: flanterm::sys::flanterm_fb_init(
+                    ctx: flanterm_sys::flanterm_fb_init(
                         Some(malloc),
                         Some(free),
                         framebuffer.addr() as *mut u32,
@@ -117,7 +116,7 @@ impl Writer {
     }
 
     pub fn write(&mut self, s: &str) {
-        unsafe { flanterm::sys::flanterm_write(self.ctx, s.as_ptr() as *const i8, s.len()) };
+        unsafe { flanterm_sys::flanterm_write(self.ctx, s.as_ptr() as *const i8, s.len()) };
     }
 }
 
@@ -142,17 +141,20 @@ macro_rules! println {
 #[macro_export]
 macro_rules! print_fill {
     ($what:expr) => {
-        $crate::utils::term::_print_fill($what, "")
+        $crate::utils::term::_print_fill($what, "", true)
     };
     ($what:expr, $with:expr) => {
-        $crate::utils::term::_print_fill($what, $with)
+        $crate::utils::term::_print_fill($what, $with, true)
+    };
+    ($what:expr, $with:expr, $newline:expr) => {
+        $crate::utils::term::_print_fill($what, $with, $newline)
     };
 }
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     serial_print!("{}", args);
-    if unsafe { FINISHED_INIT } {
+    if crate::memory::MEMORY_INIT_STAGE.load(Ordering::Relaxed) > 0 {
         interrupts::without_interrupts(|| {
             for writer in WRITERS.lock().iter_mut() {
                 writer.write_fmt(args).expect("Printing failed");
@@ -162,26 +164,29 @@ pub fn _print(args: fmt::Arguments) {
 }
 
 #[doc(hidden)]
-pub fn _print_fill(what: &str, with: &str) {
+pub fn _print_fill(what: &str, with: &str, newline: bool) {
     if with.is_empty() {
-        serial_print!("{}\n", what.repeat(65));
+        serial_print!("{}", what.repeat(65));
     } else {
-        serial_print!("{} {} {}\n", what.repeat(25), with, what.repeat(25));
+        serial_print!("{} {} {}", what.repeat(25), with, what.repeat(25));
     }
-    if unsafe { FINISHED_INIT } {
+    if newline {
+        serial_print!("\n");
+    }
+    if crate::memory::MEMORY_INIT_STAGE.load(Ordering::Relaxed) > 0 {
         interrupts::without_interrupts(|| {
             for (i, writer) in WRITERS.lock().iter_mut().enumerate() {
                 let width = get_framebuffers().nth(i).unwrap().width() as usize;
                 let cols = (width - 2 * MARGIN) / (1 + FONT_WIDTH * FONT_SCALE_X);
                 if with.is_empty() {
                     writer
-                        .write_fmt(format_args!("{}\n", what.repeat(cols)))
+                        .write_fmt(format_args!("{}", what.repeat(cols)))
                         .expect("Printing failed");
                 } else {
                     let x = what.repeat(cols / 2 - with.len() / 2 - 1);
                     writer
                         .write_fmt(format_args!(
-                            "{} {} {}{}\n",
+                            "{} {} {}{}",
                             x,
                             with,
                             x,
@@ -189,6 +194,9 @@ pub fn _print_fill(what: &str, with: &str) {
                         ))
                         .expect("Printing failed");
                 };
+                if newline {
+                    writer.write("\n");
+                }
             }
         });
     }

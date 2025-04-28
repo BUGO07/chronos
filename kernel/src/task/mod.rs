@@ -11,9 +11,7 @@ use core::{
     task::{Context, Poll},
 };
 
-pub mod executor;
-pub mod keyboard;
-pub mod timer;
+pub mod scheduler;
 
 pub struct Task {
     id: TaskId,

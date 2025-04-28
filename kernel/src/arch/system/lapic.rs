@@ -3,8 +3,11 @@
     Released under EUPL 1.2 License
 */
 
+use mmio::{Allow, VolBox};
+
 use crate::{
-    debug,
+    arch::{drivers::time::pit::current_pit_ticks, interrupts::IDT},
+    debug, info,
     memory::{
         get_hhdm_offset,
         vmm::{flag, page_size},
@@ -30,6 +33,7 @@ pub static mut MMIO: u64 = 0;
 pub static mut LAPIC_FREQUENCY: u64 = 0;
 
 pub fn init() {
+    info!("setting up...");
     let mut val = super::cpu::read_msr(reg::APIC_BASE);
     let phys_mmio = val & 0xFFFFF000;
 
@@ -51,39 +55,49 @@ pub fn init() {
         panic!("could not map lapic mmio");
     }
 
-    write(reg::TPR, 0x00);
-    write(reg::SIV, (1 << 8) | 0xFF);
+    unsafe {
+        IDT[0xFF].set_handler_fn(lapic_oneshot_timer_handler);
+        // pic::unmask(0xFF);
+    }
 
+    mmio_write(reg::TPR, 0x00);
+    mmio_write(reg::SIV, (1 << 8) | 0xFF);
+
+    debug!("calibrating...");
     calibrate_timer();
     arm(250_000_000, 0xFF);
 }
 
+extern "x86-interrupt" fn lapic_oneshot_timer_handler(
+    _stack_frame: x86_64::structures::idt::InterruptStackFrame,
+) {
+}
+
 pub fn arm(ns: usize, vector: u8) {
-    write(reg::TIC, 0);
-    write(reg::LVT, vector as u32);
-    write(
-        reg::TIC,
-        (ns as u128 * unsafe { LAPIC_FREQUENCY as u128 } / 1_000_000_000) as u32,
-    );
+    mmio_write(reg::TIC, 0);
+    mmio_write(reg::LVT, vector as u32);
+    mmio_write(reg::TIC, unsafe {
+        (ns as u128 * LAPIC_FREQUENCY as u128 / 1_000_000_000) as u32
+    });
 }
 
 fn calibrate_timer() {
-    write(reg::TDC, 0b1011);
+    mmio_write(reg::TDC, 0b1011);
 
     let millis = 10;
     let times = 3;
     let mut freq: u64 = 0;
 
     for _ in 0..times {
-        write(reg::TIC, 0xFFFFFFFF);
-        let target = crate::task::timer::current_ticks() + millis;
+        mmio_write(reg::TIC, 0xFFFFFFFF);
+        let target = current_pit_ticks() + millis;
         loop {
-            if crate::task::timer::current_ticks() >= target {
+            if current_pit_ticks() >= target {
                 break;
             }
         }
-        let count = read(reg::TCC);
-        write(reg::TIC, 0);
+        let count = mmio_read(reg::TCC);
+        mmio_write(reg::TIC, 0);
 
         freq += (0xFFFFFFFF - count as u64) * 100;
     }
@@ -97,16 +111,12 @@ fn calibrate_timer() {
     };
 }
 
-fn write(reg: u32, val: u32) {
-    let mut thr = unsafe {
-        mmio::VolBox::<u32, mmio::Allow, mmio::Allow>::new((MMIO + reg as u64) as *mut u32)
-    };
-    thr.write(val);
+fn mmio_write(reg: u32, val: u32) {
+    unsafe {
+        VolBox::<u32, Allow, Allow>::new((MMIO + reg as u64) as *mut u32).write(val);
+    }
 }
 
-fn read(reg: u32) -> u32 {
-    let thr = unsafe {
-        mmio::VolBox::<u32, mmio::Allow, mmio::Allow>::new((MMIO + reg as u64) as *mut u32)
-    };
-    return thr.read();
+fn mmio_read(reg: u32) -> u32 {
+    unsafe { VolBox::<u32, Allow, Allow>::new((MMIO + reg as u64) as *mut u32).read() }
 }
