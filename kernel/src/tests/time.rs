@@ -3,7 +3,10 @@
     Released under EUPL 1.2 License
 */
 
-use crate::{arch::drivers::time::pit::current_pit_ticks, print};
+use crate::{
+    arch::drivers::time::{KernelTimer, pit::current_pit_ticks},
+    print,
+};
 
 pub fn pit_timer() {
     let time = current_pit_ticks();
@@ -31,7 +34,6 @@ pub fn kvm_timer() {
     }
 }
 
-// ! not supported by default because cpu freq never measured
 pub fn tsc_timer() {
     let tsc = unsafe {
         crate::arch::drivers::time::tsc::TSC_TIMER
