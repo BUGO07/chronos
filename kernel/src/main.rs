@@ -84,10 +84,11 @@ unsafe extern "C" fn kmain() -> ! {
         info!("display {}: size - {}x{}", i + 1, fb.width(), fb.height());
     }
 
-    let config = crate::utils::config::get_config();
+    // ! icl ts pmo sm its causing gpf
+    // let config = crate::utils::config::get_config();
 
     let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
-        .with_timezone_offset(config.time.zone_offset as i16)
+        .with_timezone_offset(240 as i16) // change me
         .adjusted_for_timezone();
 
     info!(
@@ -131,6 +132,8 @@ unsafe extern "C" fn kmain() -> ! {
         let remainder = memory_bytes % (1024 * 1024 * 1024);
         let decimal = (remainder * 100) / (1024 * 1024 * 1024);
         info!("usable memory - {}.{:02}GiB", gib, decimal);
+
+        info!("icl ts pmo ♥");
 
         // for now
         print!("$ ");
