@@ -5,11 +5,11 @@
 
 use x86_64::instructions::port::Port;
 
+pub mod cmem;
 pub mod config;
+pub mod limine;
 pub mod logger;
-pub mod memcmp;
 pub mod term;
-pub mod time;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]

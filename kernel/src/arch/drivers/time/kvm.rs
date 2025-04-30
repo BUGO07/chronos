@@ -8,9 +8,11 @@ use core::{
     cell::OnceCell,
 };
 
-use alloc::{format, string::String, sync::Arc};
+use alloc::sync::Arc;
 
-use crate::{debug, info, memory::get_hhdm_offset};
+use crate::{debug, info, utils::limine::get_hhdm_offset};
+
+use super::KernelTimer;
 
 pub static mut KVM_TIMER: OnceCell<KvmTimer> = OnceCell::new();
 
@@ -28,8 +30,10 @@ impl KvmTimer {
             table_pointer: Arc::new(PvClockVcpuTimeInfo::default()),
         }
     }
+}
 
-    pub fn elapsed_ns(&self) -> u64 {
+impl KernelTimer for KvmTimer {
+    fn elapsed_ns(&self) -> u64 {
         let table = &self.table_pointer;
         let mut time: u128 = unsafe { _rdtsc() as u128 } - table.tsc_timestamp as u128;
         if table.tsc_shift >= 0 {
@@ -43,32 +47,12 @@ impl KvmTimer {
         return time as u64 - unsafe { STARTUP_OFFSET };
     }
 
-    pub fn elapsed_pretty(&self, digits: u32) -> String {
-        let elapsed_ns = self.elapsed_ns();
-        let subsecond_ns = elapsed_ns % 1_000_000_000;
-
-        let divisor = 10u64.pow(9 - digits);
-        let subsecond = subsecond_ns / divisor;
-
-        let elapsed_ms = elapsed_ns / 1_000_000;
-        let seconds_total = elapsed_ms / 1000;
-        let seconds = seconds_total % 60;
-        let minutes_total = seconds_total / 60;
-        let minutes = minutes_total % 60;
-        let hours = minutes_total / 60;
-
-        format!(
-            "{:02}:{:02}:{:02}.{:0width$}",
-            hours,
-            minutes,
-            seconds,
-            subsecond,
-            width = digits as usize
-        )
+    fn is_supported(&self) -> bool {
+        return self.supported;
     }
 
-    pub fn is_supported(&self) -> bool {
-        return self.supported;
+    fn name(&self) -> &'static str {
+        "KVM"
     }
 }
 

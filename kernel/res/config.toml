@@ -1,2 +1,2 @@
 [time]
-zone_offset = 240 # my timezone is UTC+4:00
+zone_offset = 240 # UTC:X / my timezone is UTC+4:00

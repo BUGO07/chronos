@@ -8,10 +8,8 @@ use mmio::{Allow, VolBox};
 use crate::{
     arch::{drivers::time::pit::current_pit_ticks, interrupts::IDT},
     debug, info,
-    memory::{
-        get_hhdm_offset,
-        vmm::{flag, page_size},
-    },
+    memory::vmm::{flag, page_size},
+    utils::limine::get_hhdm_offset,
 };
 
 #[allow(dead_code)]
@@ -36,29 +34,24 @@ pub fn init() {
     info!("setting up...");
     let mut val = super::cpu::read_msr(reg::APIC_BASE);
     let phys_mmio = val & 0xFFFFF000;
+    let mmio = phys_mmio + get_hhdm_offset();
+    unsafe { MMIO = mmio };
 
     val |= 1 << 11;
     super::cpu::write_msr(reg::APIC_BASE, val);
 
-    unsafe { MMIO = phys_mmio + get_hhdm_offset() };
-
-    debug!("mapping mmio: 0x{:X} -> 0x{:X}", phys_mmio, unsafe { MMIO });
+    debug!("mapping mmio: 0x{:X} -> 0x{:X}", phys_mmio, mmio);
 
     let psize = page_size::SMALL;
 
-    if !crate::memory::vmm::PAGEMAP.lock().map(
-        unsafe { MMIO },
-        phys_mmio,
-        flag::PRESENT | flag::WRITE,
-        psize,
-    ) {
+    if !crate::memory::vmm::PAGEMAP
+        .lock()
+        .map(mmio, phys_mmio, flag::PRESENT | flag::WRITE, psize)
+    {
         panic!("could not map lapic mmio");
     }
 
-    unsafe {
-        IDT[0xFF].set_handler_fn(lapic_oneshot_timer_handler);
-        // pic::unmask(0xFF);
-    }
+    unsafe { IDT[0xFF].set_handler_fn(lapic_oneshot_timer_handler) };
 
     mmio_write(reg::TPR, 0x00);
     mmio_write(reg::SIV, (1 << 8) | 0xFF);
@@ -66,6 +59,8 @@ pub fn init() {
     debug!("calibrating...");
     calibrate_timer();
     arm(250_000_000, 0xFF);
+
+    debug!("done");
 }
 
 extern "x86-interrupt" fn lapic_oneshot_timer_handler(

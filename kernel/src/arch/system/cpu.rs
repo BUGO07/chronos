@@ -5,9 +5,10 @@
 
 // ! idk if this works, its temporary
 
-use core::arch::{asm, x86_64::__cpuid};
-
-use crate::utils::memcmp::Memcmp;
+use core::{
+    arch::{asm, x86_64::__cpuid},
+    ffi::c_void,
+};
 
 #[derive(Debug)]
 pub struct Registers {
@@ -111,24 +112,30 @@ pub fn read_registers() -> Registers {
 }
 
 pub fn kvm_base() -> u32 {
-    if in_hypervisor() {
-        let mut signature: [u32; 3] = [0; 3];
-        for base in (0x40000000..0x40010000).step_by(0x100) {
-            let id = unsafe { __cpuid(base) };
+    unsafe {
+        if in_hypervisor() {
+            let mut signature: [u32; 3] = [0; 3];
+            for base in (0x40000000..0x40010000).step_by(0x100) {
+                let id = __cpuid(base);
 
-            signature[0] = id.ebx;
-            signature[1] = id.ecx;
-            signature[2] = id.edx;
+                signature[0] = id.ebx;
+                signature[1] = id.ecx;
+                signature[2] = id.edx;
 
-            let mut output: [u8; 12] = [0; 12];
+                let mut output: [u8; 12] = [0; 12];
 
-            for (i, num) in signature.iter().enumerate() {
-                let bytes = num.to_le_bytes(); // Convert u32 to [u8; 4]
-                output[i * 4..(i + 1) * 4].copy_from_slice(&bytes);
-            }
-
-            if !(b"KVMKVMKVM\0\0\0".memcmp(&output)) {
-                return base;
+                for (i, num) in signature.iter().enumerate() {
+                    let bytes = num.to_le_bytes(); // Convert u32 to [u8; 4]
+                    output[i * 4..(i + 1) * 4].copy_from_slice(&bytes);
+                }
+                if crate::utils::cmem::memcmp(
+                    "KVMKVMKVM\0\0\0".as_ptr() as *const c_void,
+                    output.as_ptr() as *const c_void,
+                    12,
+                ) != 0
+                {
+                    return base;
+                }
             }
         }
     }
