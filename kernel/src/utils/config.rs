@@ -27,7 +27,8 @@ pub fn get_config() -> Config {
         .get("zone_offset")
         .unwrap_or(&tomling::Value::Integer(0))
         .as_i64()
-        .unwrap();
+        .unwrap()
+        .clamp(-720, 840); // UTC-12:00-UTC+14:00
 
     Config {
         time: TimeConfig { zone_offset: zone },

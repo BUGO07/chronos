@@ -5,14 +5,13 @@
 
 use crate::{
     debug, info,
-    memory::{
-        get_hhdm_offset,
-        vmm::{flag, page_size},
-    },
+    memory::vmm::{flag, page_size},
+    utils::limine::get_hhdm_offset,
 };
-use alloc::{format, string::String};
 use core::{cell::OnceCell, ptr::null_mut};
 use uacpi_sys::*;
+
+use super::KernelTimer;
 
 static mut HPET_ADDRESS: u64 = 0;
 
@@ -48,8 +47,14 @@ impl HpetTimer {
             0
         }
     }
+}
 
-    pub fn elapsed_ns(&self) -> u64 {
+impl KernelTimer for HpetTimer {
+    fn is_supported(&self) -> bool {
+        self.supported
+    }
+
+    fn elapsed_ns(&self) -> u64 {
         if self.supported {
             (self.elapsed_cycles() as u128 * 1_000_000_000 / self.tickrate as u128) as u64
         } else {
@@ -57,32 +62,8 @@ impl HpetTimer {
         }
     }
 
-    pub fn elapsed_pretty(&self, digits: u32) -> String {
-        let elapsed_ns = self.elapsed_ns();
-        let subsecond_ns = elapsed_ns % 1_000_000_000;
-
-        let divisor = 10u64.pow(9 - digits);
-        let subsecond = subsecond_ns / divisor;
-
-        let elapsed_ms = elapsed_ns / 1_000_000;
-        let seconds_total = elapsed_ms / 1000;
-        let seconds = seconds_total % 60;
-        let minutes_total = seconds_total / 60;
-        let minutes = minutes_total % 60;
-        let hours = minutes_total / 60;
-
-        format!(
-            "{:02}:{:02}:{:02}.{:0width$}",
-            hours,
-            minutes,
-            seconds,
-            subsecond,
-            width = digits as usize
-        )
-    }
-
-    pub fn is_supported(&self) -> bool {
-        self.supported
+    fn name(&self) -> &'static str {
+        "HPET"
     }
 }
 

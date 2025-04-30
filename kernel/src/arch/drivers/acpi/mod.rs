@@ -3,15 +3,12 @@
     Released under EUPL 1.2 License
 */
 
+use core::ptr::null_mut;
+
 use crate::{error, println};
-use limine::{request::RsdpRequest, response::RsdpResponse};
 use uacpi_sys::*;
 
 pub mod uacpi;
-
-#[used]
-#[unsafe(link_section = ".requests")]
-static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
 
 pub fn init() {
     unsafe {
@@ -37,13 +34,29 @@ pub fn init() {
         if ret != UACPI_STATUS_OK {
             panic!("uacpi didn't initialize properly | gpe init - {}", ret);
         }
+
+        uacpi_install_fixed_event_handler(
+            UACPI_FIXED_EVENT_POWER_BUTTON,
+            Some(uacpi_powerbtn_handler),
+            null_mut(),
+        );
+
+        uacpi_install_fixed_event_handler(
+            UACPI_FIXED_EVENT_SLEEP_BUTTON,
+            Some(uacpi_sleepbtn_handler),
+            null_mut(),
+        );
     }
 }
 
-pub fn get_rsdp() -> &'static RsdpResponse {
-    RSDP_REQUEST
-        .get_response()
-        .expect("couldn't get rsdp from limine")
+unsafe extern "C" fn uacpi_powerbtn_handler(_: uacpi_handle) -> uacpi_interrupt_ret {
+    perform_power_action(PowerAction::Shutdown);
+    return UACPI_INTERRUPT_HANDLED;
+}
+
+unsafe extern "C" fn uacpi_sleepbtn_handler(_: uacpi_handle) -> uacpi_interrupt_ret {
+    perform_power_action(PowerAction::Sleep);
+    return UACPI_INTERRUPT_HANDLED;
 }
 
 pub fn shutdown() {

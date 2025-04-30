@@ -20,12 +20,12 @@ Contributors are welcome.
 - PS/2 Mouse
 - Cooperative Scheduler
 - ACPI
+- PCI
 - Basic Shell (i know its not supposed to be there, its temporary)
 
 ## TODO:
 
 - Preemptive Scheduler
-- PCI
 - VFS
 - USB
 - Userspace

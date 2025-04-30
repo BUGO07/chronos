@@ -12,9 +12,10 @@ use core::{
     ptr::null_mut,
     sync::atomic::Ordering,
 };
-use limine::request::FramebufferRequest;
 use spin::Mutex;
 use x86_64::instructions::interrupts;
+
+use super::limine::get_framebuffers;
 
 lazy_static::lazy_static! {
     pub static ref WRITERS: Mutex<Vec<Writer>> = Mutex::new(Writer::new());
@@ -27,20 +28,12 @@ pub struct Writer {
 unsafe impl Send for Writer {}
 unsafe impl Sync for Writer {}
 
-#[unsafe(link_section = ".requests")]
-static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
-
 unsafe extern "C" fn malloc(size: usize) -> *mut core::ffi::c_void {
     unsafe { alloc::alloc::alloc(Layout::from_size_align(size, 0x10).unwrap()) as *mut c_void }
 }
 
 unsafe extern "C" fn free(ptr: *mut core::ffi::c_void, size: usize) {
     unsafe { alloc::alloc::dealloc(ptr as *mut u8, Layout::from_size_align(size, 0x10).unwrap()) };
-}
-
-pub fn get_framebuffers()
--> impl core::iter::Iterator<Item = limine::framebuffer::Framebuffer<'static>> {
-    FRAMEBUFFER_REQUEST.get_response().unwrap().framebuffers()
 }
 
 const FONT_WIDTH: usize = 8;

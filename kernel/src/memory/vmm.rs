@@ -5,14 +5,14 @@
 
 use core::{alloc::Layout, arch::asm};
 
-use limine::{
-    memory_map::EntryType,
-    request::{ExecutableAddressRequest, ExecutableFileRequest},
-};
+use limine::memory_map::EntryType;
 use spin::Mutex;
 use x86_64::{align_down, align_up};
 
-use crate::{debug, info};
+use crate::{
+    debug, info,
+    utils::limine::{get_executable_address, get_executable_file},
+};
 
 use super::{ALLOCATOR, get_hhdm_offset};
 
@@ -36,12 +36,6 @@ lazy_static::lazy_static! {
 
 unsafe impl Send for Pagemap {}
 
-#[unsafe(link_section = ".requests")]
-static EXECUTABLE_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
-
-#[unsafe(link_section = ".requests")]
-static EXECUTABLE_FILE_REQUEST: ExecutableFileRequest = ExecutableFileRequest::new();
-
 #[repr(C)]
 #[repr(packed)]
 pub struct Table {
@@ -61,6 +55,7 @@ impl Pagemap {
     }
 
     pub fn map(&mut self, virt: u64, phys: u64, mut flags: u64, psize: u64) -> bool {
+        if phys % psize != 0 || virt % psize != 0 {}
         let pml4_entry = (virt & (0x1ff << 39)) >> 39;
         let pml3_entry = (virt & (0x1ff << 30)) >> 30;
         let pml2_entry = (virt & (0x1ff << 21)) >> 21;
@@ -69,7 +64,7 @@ impl Pagemap {
         let pml4 = (self.top_level as u64 + super::get_hhdm_offset()) as *mut Table;
 
         let pml3 = get_next_level(pml4, pml4_entry, true);
-        if pml3 == core::ptr::null_mut() {
+        if pml3.is_null() {
             return false;
         }
         if psize == page_size::LARGE {
@@ -81,7 +76,7 @@ impl Pagemap {
         }
 
         let pml2 = get_next_level(pml3, pml3_entry, true);
-        if pml2 == core::ptr::null_mut() {
+        if pml2.is_null() {
             return false;
         }
         if psize == page_size::MEDIUM {
@@ -93,7 +88,7 @@ impl Pagemap {
         }
 
         let pml1 = get_next_level(pml2, pml2_entry, true);
-        if pml1 == core::ptr::null_mut() {
+        if pml1.is_null() {
             return false;
         }
 
@@ -141,7 +136,7 @@ fn get_next_level(top_level: *mut Table, idx: u64, allocate: bool) -> *mut Table
 }
 
 pub fn init() {
-    let mem_map = super::get_mem_map();
+    let mem_map = super::get_memory_map();
     let hhdm_offset = super::get_hhdm_offset();
     info!("setting up the kernel pagemap...");
     debug!("hhdm offset is: 0x{:X}", hhdm_offset);
@@ -181,15 +176,11 @@ pub fn init() {
         }
     }
 
-    let executable_address_response = EXECUTABLE_ADDRESS_REQUEST.get_response().unwrap();
+    let executable_address_response = get_executable_address();
     let phys_base = executable_address_response.physical_base();
     let virt_base = executable_address_response.virtual_base();
 
-    let size = EXECUTABLE_FILE_REQUEST
-        .get_response()
-        .unwrap()
-        .file()
-        .size();
+    let size = get_executable_file().size();
 
     for i in (0..size).step_by(page_size::SMALL as usize) {
         pmap.map(
@@ -204,4 +195,5 @@ pub fn init() {
     unsafe {
         asm!("mov cr3, {}", in(reg) addr, options(nostack));
     }
+    debug!("done");
 }

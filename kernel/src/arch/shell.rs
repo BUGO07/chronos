@@ -12,7 +12,11 @@ use alloc::{
 use pc_keyboard::{DecodedKey, KeyCode};
 use spin::Mutex;
 
-use crate::{arch::drivers::time, print, print_fill, println, utils::logger::color};
+use crate::{
+    arch::drivers::time::{self, KernelTimer},
+    print, print_fill, println,
+    utils::logger::color,
+};
 
 use super::drivers::keyboard::ScancodeStream;
 

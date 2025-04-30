@@ -6,4 +6,5 @@
 pub mod acpi;
 pub mod keyboard;
 pub mod mouse;
+pub mod pci;
 pub mod time;

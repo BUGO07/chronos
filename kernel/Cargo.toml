@@ -4,6 +4,16 @@ version = "0.1.0"
 authors = ["bugo07"]
 edition = "2024"
 
+[profile.dev]
+opt-level = 1
+lto = "thin" # makes performance 10x with no noticable difference in compile time
+
+[profile.release]
+opt-level = 1 # bootloop on 2 and 3 // "z" sometimes has better performance
+codegen-units = 1
+strip = true
+lto = "fat"
+
 [profile.smol]
 inherits = "release"
 opt-level = "z"

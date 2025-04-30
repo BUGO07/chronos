@@ -18,32 +18,19 @@ pub mod tests;
 
 extern crate alloc;
 
-use crate::{arch::drivers::time::tsc::measure_cpu_frequency, task::Task, utils::halt_loop};
+use crate::{arch::drivers::time::tsc::measure_cpu_frequency_async, task::Task, utils::halt_loop};
 
 use alloc::{string::ToString, vec::Vec};
 use core::{
     panic::PanicInfo,
     sync::atomic::{AtomicU64, Ordering},
 };
-use limine::{
-    BaseRevision,
-    request::{RequestsEndMarker, RequestsStartMarker},
-};
+
+use utils::limine::{BASE_REVISION, get_bootloader_info, get_framebuffers};
+
 use task::scheduler::Scheduler;
 
 const NOOO: &str = include_str!("../res/nooo.txt");
-
-#[used]
-#[unsafe(link_section = ".requests")]
-static BASE_REVISION: BaseRevision = BaseRevision::new();
-
-#[used]
-#[unsafe(link_section = ".requests_start_marker")]
-static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
-
-#[used]
-#[unsafe(link_section = ".requests_end_marker")]
-static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
 pub static mut CPU_FREQ: AtomicU64 = AtomicU64::new(0);
 
@@ -74,6 +61,7 @@ unsafe extern "C" fn kmain() -> ! {
 
     crate::arch::drivers::acpi::init();
     crate::arch::drivers::time::init();
+    crate::arch::drivers::pci::pci_enumerate();
     crate::arch::drivers::keyboard::init();
     crate::arch::drivers::mouse::init();
 
@@ -83,7 +71,14 @@ unsafe extern "C" fn kmain() -> ! {
 
     info!("up and running");
 
-    let framebuffers = crate::utils::term::get_framebuffers().collect::<Vec<_>>();
+    let bootloader_info = get_bootloader_info();
+    info!(
+        "bootloader info - {} {}",
+        bootloader_info.name(),
+        bootloader_info.version(),
+    );
+
+    let framebuffers = get_framebuffers().collect::<Vec<_>>();
     info!("found {} displays:", framebuffers.len());
     for (i, fb) in framebuffers.iter().enumerate() {
         info!("display {}: size - {}x{}", i + 1, fb.width(), fb.height());
@@ -112,8 +107,8 @@ unsafe extern "C" fn kmain() -> ! {
     scheduler.spawn(Task::new(
         crate::arch::drivers::keyboard::handle_keypresses(),
     ));
-    scheduler.spawn(Task::new(async move {
-        let cpu_freq = measure_cpu_frequency().await;
+    scheduler.spawn(Task::new(async {
+        let cpu_freq = measure_cpu_frequency_async().await;
         if cpu_freq == 0 {
             panic!("failed to measure cpu frequency");
         }
@@ -130,6 +125,12 @@ unsafe extern "C" fn kmain() -> ! {
             cpu_freq / 1_000_000_000,
             (cpu_freq % 1_000_000_000) / 1_000_000,
         );
+
+        let memory_bytes = crate::memory::TOTAL_USABLE_MEMORY.load(Ordering::Relaxed);
+        let gib = memory_bytes / (1024 * 1024 * 1024);
+        let remainder = memory_bytes % (1024 * 1024 * 1024);
+        let decimal = (remainder * 100) / (1024 * 1024 * 1024);
+        info!("usable memory - {}.{:02}GiB", gib, decimal);
 
         // for now
         print!("$ ");
