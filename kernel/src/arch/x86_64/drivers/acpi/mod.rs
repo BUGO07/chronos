@@ -51,12 +51,12 @@ pub fn init() {
 
 unsafe extern "C" fn uacpi_powerbtn_handler(_: uacpi_handle) -> uacpi_interrupt_ret {
     perform_power_action(PowerAction::Shutdown);
-    return UACPI_INTERRUPT_HANDLED;
+    UACPI_INTERRUPT_HANDLED
 }
 
 unsafe extern "C" fn uacpi_sleepbtn_handler(_: uacpi_handle) -> uacpi_interrupt_ret {
     perform_power_action(PowerAction::Sleep);
-    return UACPI_INTERRUPT_HANDLED;
+    UACPI_INTERRUPT_HANDLED
 }
 
 pub fn shutdown() {
