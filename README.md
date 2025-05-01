@@ -29,6 +29,7 @@ Contributors are welcome.
 - VFS
 - USB
 - Userspace
+- Expand aarch64 support
 
 ## Known Bugs/Issues
 
@@ -44,8 +45,10 @@ Make sure you have the following installed:
 * Rust
 * Clang
 * Make
-* QEMU x86-64
+* QEMU x86_64 | aarch64
 * Xorriso
+
+You will also need `aarch64-linux-gnu-gcc` to build for cross-compile c libraries
 
 Follow these steps to build and run the os
 1. Clone this repo with:\
@@ -57,4 +60,4 @@ Follow these steps to build and run the os
 ``RUST_PROFILE="smol" make run`` For optimizing for size\
 ``make test`` For running tests
 
-Change the KARCH environment variable to run x86_64 (default) or aarch64 (arm64) architectures (no tests for it yet)
+Change the KARCH environment variable to run `x86_64` (default) or `aarch64` (arm64) architectures (no tests for it yet)
