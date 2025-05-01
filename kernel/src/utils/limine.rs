@@ -4,7 +4,6 @@
 */
 
 use limine::{
-    BaseRevision,
     file::File,
     framebuffer::Framebuffer,
     memory_map::Entry,
@@ -22,10 +21,6 @@ pub static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 #[used]
 #[unsafe(link_section = ".requests_end_marker")]
 pub static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
-
-#[used]
-#[unsafe(link_section = ".requests")]
-pub static BASE_REVISION: BaseRevision = BaseRevision::new();
 
 #[used]
 #[unsafe(link_section = ".requests")]

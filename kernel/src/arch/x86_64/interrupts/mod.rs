@@ -22,6 +22,7 @@ pub fn init_idt() {
         idt.general_protection_fault
             .set_handler_fn(general_protection_fault_handler);
         idt[0x20].set_handler_fn(crate::arch::drivers::time::pit::timer_interrupt_handler);
+        idt[0x21].set_handler_fn(crate::arch::drivers::keyboard::keyboard_interrupt_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
         IDT = idt;
         IDT.load();
@@ -64,5 +65,4 @@ extern "x86-interrupt" fn page_fault_handler(
     println!("Error Code: {:?}", error_code);
     println!("{:#?}{}", stack_frame, crate::utils::logger::color::RESET);
     panic!("page faulted");
-    // halt_loop();
 }

@@ -3,7 +3,6 @@
     Released under EUPL 1.2 License
 */
 
-use crate::{arch::interrupts::IDT, debug, info, warn};
 use alloc::vec::Vec;
 use conquer_once::spin::OnceCell;
 use core::{
@@ -21,10 +20,16 @@ use x86_64::{instructions::port::Port, structures::idt::InterruptStackFrame};
 static SCANCODE_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();
 static WAKER: AtomicWaker = AtomicWaker::new();
 
+#[non_exhaustive]
 pub struct ScancodeStream {
-    _private: (),
     // this probably shouldnt be here
     pub keys_down: Vec<KeyCode>,
+}
+
+impl Default for ScancodeStream {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ScancodeStream {
@@ -33,7 +38,6 @@ impl ScancodeStream {
             .try_init_once(|| ArrayQueue::new(100))
             .expect("ScancodeStream::new should only be called once");
         ScancodeStream {
-            _private: (),
             keys_down: Vec::new(),
         }
     }
@@ -51,7 +55,7 @@ impl Stream for ScancodeStream {
             return Poll::Ready(Some(scancode));
         }
 
-        WAKER.register(&cx.waker());
+        WAKER.register(cx.waker());
         match queue.pop() {
             Some(scancode) => {
                 WAKER.take();
@@ -62,24 +66,15 @@ impl Stream for ScancodeStream {
     }
 }
 
-pub fn init() {
-    // yeah;
-    unsafe {
-        info!("initializing ps/2 keyboard...");
-        IDT[0x21].set_handler_fn(keyboard_interrupt_handler);
-        debug!("done");
-    }
-}
-
-extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     add_scancode(unsafe { Port::new(0x60).read() });
     crate::arch::interrupts::pic::send_eoi(1);
 }
 
 pub fn add_scancode(scancode: u8) {
     if let Ok(queue) = SCANCODE_QUEUE.try_get() {
-        if let Err(_) = queue.push(scancode) {
-            warn!("scancode queue full; dropping keyboard input");
+        if queue.push(scancode).is_err() {
+            crate::warn!("scancode queue full; dropping keyboard input");
         } else {
             WAKER.wake();
         }
@@ -106,7 +101,12 @@ pub async fn handle_keypresses() {
 
             if let Some(dc) = keyboard.process_keyevent(key_event) {
                 // dont berate me this is temporary
-                crate::arch::shell::SHELL.lock().key_event(dc, &scancodes);
+                unsafe {
+                    crate::arch::shell::SHELL
+                        .get_mut()
+                        .unwrap()
+                        .key_event(dc, &scancodes)
+                };
             }
         }
     }

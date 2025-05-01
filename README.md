@@ -1,6 +1,6 @@
 # ChronOS
 
-A basic x86_64 hobby os made in rust.
+A basic multi-arch hobby os held together by duct tape, written in rust.
 
 Contributors are welcome.
 
@@ -8,7 +8,7 @@ Contributors are welcome.
 
 ## [LICENSE](LICENSE)
 
-## Features
+## Features (most of these are x86_64 only)
 
 - Basic Logger
 - Serial
@@ -36,6 +36,7 @@ Contributors are welcome.
 - Double fault on my laptop when booting for unknown reason.
 - No way to wake up from sleep yet.
 - Opt-level 2 and 3 cause a bootloop.
+- Using the keyboard before `up and running` makes keyboard and mouse not work
 
 ## Building And Running
 
@@ -55,3 +56,5 @@ Follow these steps to build and run the os
 ``RUST_PROFILE="release" make run`` For running release mode\
 ``RUST_PROFILE="smol" make run`` For optimizing for size\
 ``make test`` For running tests
+
+Change the KARCH environment variable to run x86_64 (default) or aarch64 (arm64) architectures (no tests for it yet)

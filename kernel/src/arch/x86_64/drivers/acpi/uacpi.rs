@@ -18,7 +18,7 @@ use x86_64::{VirtAddr, align_down, align_up, instructions::port::Port};
 
 use crate::{
     arch::{
-        drivers::pci::{
+        device::pci::{
             PciAddress, pci_config_read_u8, pci_config_read_u16, pci_config_read_u32,
             pci_config_write_u8, pci_config_write_u16, pci_config_write_u32,
         },
@@ -45,9 +45,9 @@ pub unsafe extern "C" fn uacpi_kernel_pci_device_open(
     handle: *mut uacpi_handle,
 ) -> uacpi_status {
     let pci_addr = PciAddress {
-        bus: address.segment as u8, // if you're not supporting multiple segments
-        device: address.device as u8,
-        function: address.function as u8,
+        bus: address.segment as u8,
+        device: address.device,
+        function: address.function,
     };
 
     let id = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
@@ -232,11 +232,14 @@ unsafe extern "C" fn uacpi_kernel_map(addr: uacpi_phys_addr, len: uacpi_size) ->
     let size = align_up((addr - paddr) + len as u64, psize);
 
     for i in (0..size).step_by(psize as usize) {
-        PAGEMAP
-            .lock()
-            .map(paddr + i, paddr + i, flag::PRESENT | flag::WRITE, psize);
+        unsafe {
+            PAGEMAP
+                .get_mut()
+                .unwrap()
+                .map(paddr + i, paddr + i, flag::PRESENT | flag::WRITE, psize)
+        };
     }
-    return addr as *mut c_void;
+    addr as *mut c_void
 }
 
 // no unmap yet
@@ -255,7 +258,6 @@ unsafe extern "C" fn uacpi_kernel_alloc(size: uacpi_size) -> *mut c_void {
         if mem.is_null() {
             return core::ptr::null_mut();
         }
-        // Save the size at the start
         *(mem as *mut usize) = size;
         mem.add(core::mem::size_of::<usize>()) as *mut c_void
     }
@@ -317,7 +319,6 @@ unsafe extern "C" fn uacpi_kernel_create_mutex() -> uacpi_handle {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn uacpi_kernel_free_mutex(handle: uacpi_handle) {
     if !handle.is_null() {
-        // Reconstruct the Box so it gets dropped (freed)
         drop(unsafe { Box::from_raw(handle as *mut Mutex<()>) });
     }
 }
@@ -383,7 +384,7 @@ unsafe extern "C" fn uacpi_kernel_wait_for_event(
         while !event.decrement() {
             unsafe { uacpi_kernel_sleep(10) };
         }
-        return true;
+        true
     } else {
         let mut remaining = timeout as i64;
         while !event.decrement() {
@@ -393,7 +394,7 @@ unsafe extern "C" fn uacpi_kernel_wait_for_event(
             unsafe { uacpi_kernel_sleep(10) };
             remaining -= 10;
         }
-        return true;
+        true
     }
 }
 
@@ -487,7 +488,6 @@ unsafe extern "C" fn uacpi_kernel_create_spinlock() -> uacpi_handle {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn uacpi_kernel_free_spinlock(handle: uacpi_handle) {
     if !handle.is_null() {
-        // Reconstruct the Box so it gets dropped (freed)
         drop(unsafe { Box::from_raw(handle as *mut SpinMutex<()>) });
     }
 }
@@ -496,9 +496,9 @@ unsafe extern "C" fn uacpi_kernel_free_spinlock(handle: uacpi_handle) {
 unsafe extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flags {
     if !handle.is_null() {
         let lock = unsafe { &*(handle as *mut SpinMutex<()>) };
-        lock.lock(); // Blocks until the lock is acquired
+        lock.lock();
     }
-    return 0;
+    0
 }
 
 #[unsafe(no_mangle)]

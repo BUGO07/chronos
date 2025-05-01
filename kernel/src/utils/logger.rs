@@ -3,11 +3,9 @@
     Released under EUPL 1.2 License
 */
 
-use core::{fmt::Write, sync::atomic::Ordering};
+use core::fmt::Write;
 
-use x86_64::instructions::interrupts;
-
-use crate::{serial_print, utils::term::WRITERS};
+use crate::{memory::get_memory_init_stage, serial_print, utils::term::WRITERS};
 
 pub mod color {
     use alloc::{format, string::String};
@@ -48,18 +46,21 @@ pub mod color {
 
     pub fn rgb(r: u8, g: u8, b: u8, bg: bool) -> String {
         let first = if bg { "48" } else { "38" };
-        format!("\x1b[{};2;{};{};{}m", first, r, g, b) // super dim
+        format!("\x1b[{first};2;{r};{g};{b}m") // super dim
     }
 }
 
 // janky but whatever
 pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::fmt::Arguments) {
-    #[cfg(not(feature = "tests"))]
+    #[cfg(not(any(feature = "tests", feature = "uacpi_test")))]
     {
         if level == "dbug" && !cfg!(debug_assertions) {
             return;
         }
         module_path = module_path.split("::").last().unwrap();
+        if module_path == "x86_64" || module_path == "aarch64" {
+            module_path = "chronos";
+        }
 
         let digits = 5;
 
@@ -76,8 +77,8 @@ pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::
         let minutes = minutes_total % 60;
         let hours = minutes_total / 60;
 
-        if crate::memory::MEMORY_INIT_STAGE.load(Ordering::Relaxed) > 0 {
-            interrupts::without_interrupts(|| {
+        if get_memory_init_stage() > 0 {
+            let closure = || {
                 for writer in WRITERS.lock().iter_mut() {
                     writer
                         .write_fmt(format_args!(
@@ -97,7 +98,18 @@ pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::
                         ))
                         .expect("Printing to WRITER failed");
                 }
-            });
+            };
+
+            #[cfg(target_arch = "x86_64")]
+            x86_64::instructions::interrupts::without_interrupts(closure);
+
+            // *not sure but works
+            #[cfg(target_arch = "aarch64")]
+            {
+                aarch64::irq::disable();
+                closure();
+                aarch64::irq::enable();
+            }
         }
 
         serial_print!(

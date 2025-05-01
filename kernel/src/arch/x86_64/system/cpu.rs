@@ -125,11 +125,11 @@ pub fn kvm_base() -> u32 {
                 let mut output: [u8; 12] = [0; 12];
 
                 for (i, num) in signature.iter().enumerate() {
-                    let bytes = num.to_le_bytes(); // Convert u32 to [u8; 4]
+                    let bytes = num.to_le_bytes();
                     output[i * 4..(i + 1) * 4].copy_from_slice(&bytes);
                 }
                 if crate::utils::cmem::memcmp(
-                    "KVMKVMKVM\0\0\0".as_ptr() as *const c_void,
+                    c"KVMKVMKVM".as_ptr() as *const c_void,
                     output.as_ptr() as *const c_void,
                     12,
                 ) != 0
@@ -139,13 +139,13 @@ pub fn kvm_base() -> u32 {
             }
         }
     }
-    return 0;
+    0
 }
 
 pub fn in_hypervisor() -> bool {
     let id = unsafe { __cpuid(1) };
 
-    return (id.ecx & (1 << 31)) != 0;
+    (id.ecx & (1 << 31)) != 0
 }
 
 pub fn read_msr(msr: u32) -> u64 {

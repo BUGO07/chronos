@@ -3,11 +3,10 @@
     Released under EUPL 1.2 License
 */
 
-use core::{alloc::Layout, arch::asm};
+use core::{alloc::Layout, cell::OnceCell};
 
+use crate::utils::{align_down, align_up};
 use limine::memory_map::EntryType;
-use spin::Mutex;
-use x86_64::{align_down, align_up};
 
 use crate::{
     debug, info,
@@ -30,9 +29,7 @@ pub mod flag {
     pub const NO_EXEC: u64 = 1 << 63;
 }
 
-lazy_static::lazy_static! {
-    pub static ref PAGEMAP: Mutex<Pagemap> = Mutex::new(Pagemap::new());
-}
+pub static mut PAGEMAP: OnceCell<Pagemap> = OnceCell::new();
 
 unsafe impl Send for Pagemap {}
 
@@ -47,6 +44,12 @@ pub struct Pagemap {
     pub top_level: *mut Table,
 }
 
+impl Default for Pagemap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Pagemap {
     pub fn new() -> Pagemap {
         Pagemap {
@@ -55,7 +58,6 @@ impl Pagemap {
     }
 
     pub fn map(&mut self, virt: u64, phys: u64, mut flags: u64, psize: u64) -> bool {
-        if phys % psize != 0 || virt % psize != 0 {}
         let pml4_entry = (virt & (0x1ff << 39)) >> 39;
         let pml3_entry = (virt & (0x1ff << 30)) >> 30;
         let pml2_entry = (virt & (0x1ff << 21)) >> 21;
@@ -68,7 +70,7 @@ impl Pagemap {
             return false;
         }
         if psize == page_size::LARGE {
-            flags = flags | flag::LPAGES;
+            flags |= flag::LPAGES;
             unsafe {
                 (*pml3).entries[pml3_entry as usize] = phys | flags;
             }
@@ -80,7 +82,7 @@ impl Pagemap {
             return false;
         }
         if psize == page_size::MEDIUM {
-            flags = flags | flag::LPAGES;
+            flags |= flag::LPAGES;
             unsafe {
                 (*pml2).entries[pml2_entry as usize] = phys | flags;
             }
@@ -121,6 +123,7 @@ fn get_next_level(top_level: *mut Table, idx: u64, allocate: bool) -> *mut Table
     unsafe {
         let entry = (top_level as u64 + idx * 8) as *mut u64;
         if *entry & flag::PRESENT != 0 {
+            // ! this overflows on debug builds on my laptop;
             // println!("0x{:X}", *entry & 0x000FFFFFFFFFF000);
             return ((*entry & 0x000FFFFFFFFFF000) + super::get_hhdm_offset()) as *mut Table;
         }
@@ -131,7 +134,7 @@ fn get_next_level(top_level: *mut Table, idx: u64, allocate: bool) -> *mut Table
 
         let next_level = alloc_table();
         *entry = (next_level as u64) | flag::PRESENT | flag::WRITE | flag::USER;
-        return (next_level as u64 + super::get_hhdm_offset()) as *mut Table;
+        (next_level as u64 + super::get_hhdm_offset()) as *mut Table
     }
 }
 
@@ -141,7 +144,7 @@ pub fn init() {
     info!("setting up the kernel pagemap...");
     debug!("hhdm offset is: 0x{:X}", hhdm_offset);
 
-    let mut pmap = PAGEMAP.lock();
+    let mut pmap = Pagemap::new();
 
     for entry in mem_map {
         let etype = entry.entry_type;
@@ -191,9 +194,14 @@ pub fn init() {
         );
     }
 
-    let addr = pmap.top_level as u64;
+    #[cfg(target_arch = "x86_64")]
     unsafe {
-        asm!("mov cr3, {}", in(reg) addr, options(nostack));
+        core::arch::asm!("mov cr3, {}", in(reg) pmap.top_level as u64, options(nostack));
     }
+    #[cfg(target_arch = "aarch64")]
+    {
+        // TODO:
+    }
+    unsafe { PAGEMAP.set(pmap).ok() };
     debug!("done");
 }

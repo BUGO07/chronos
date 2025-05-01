@@ -44,10 +44,14 @@ pub fn init() {
 
     let psize = page_size::SMALL;
 
-    if !crate::memory::vmm::PAGEMAP
-        .lock()
-        .map(mmio, phys_mmio, flag::PRESENT | flag::WRITE, psize)
-    {
+    if !unsafe {
+        crate::memory::vmm::PAGEMAP.get_mut().unwrap().map(
+            mmio,
+            phys_mmio,
+            flag::PRESENT | flag::WRITE,
+            psize,
+        )
+    } {
         panic!("could not map lapic mmio");
     }
 

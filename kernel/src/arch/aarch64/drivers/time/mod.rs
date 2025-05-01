@@ -10,32 +10,23 @@ use core::{
 };
 
 use alloc::{format, string::String, vec::Vec};
-use pit::PIT_MS;
 
-pub mod hpet;
-pub mod kvm;
-pub mod pit;
-pub mod rtc;
-pub mod tsc;
+pub mod generic;
 
 pub static TIMERS_INIT_STATE: AtomicU8 = AtomicU8::new(0);
 
 static mut SLEEPING_TASKS: Vec<(u64, Waker)> = Vec::new();
 
 pub fn early_init() {
-    pit::init();
+    generic::init();
     TIMERS_INIT_STATE.store(1, Ordering::Relaxed);
-    kvm::init();
-    TIMERS_INIT_STATE.store(2, Ordering::Relaxed);
-    tsc::init();
-    TIMERS_INIT_STATE.store(3, Ordering::Relaxed);
 }
 
 pub fn init() {
-    hpet::init();
-    TIMERS_INIT_STATE.store(4, Ordering::Relaxed);
-    crate::arch::system::lapic::init();
-    TIMERS_INIT_STATE.store(5, Ordering::Relaxed);
+    // hpet::init();
+    // TIMERS_INIT_STATE.store(4, Ordering::Relaxed);
+    // crate::arch::system::lapic::init();
+    // TIMERS_INIT_STATE.store(5, Ordering::Relaxed);
 }
 
 pub fn preferred_timer_ms() -> u64 {
@@ -45,6 +36,7 @@ pub fn preferred_timer_ms() -> u64 {
 pub trait KernelTimer {
     fn name(&self) -> &'static str;
     fn is_supported(&self) -> bool;
+    fn priority(&self) -> u8;
     fn elapsed_ns(&self) -> u64;
 
     fn elapsed_pretty(&self, digits: u32) -> String {
@@ -73,25 +65,20 @@ pub trait KernelTimer {
 }
 
 pub fn preferred_timer_ns() -> u64 {
-    let state = TIMERS_INIT_STATE.load(Ordering::Relaxed);
-    let pit = PIT_MS.load(Ordering::Relaxed) * 1_000_000;
+    // let state = TIMERS_INIT_STATE.load(Ordering::Relaxed);
 
     unsafe {
-        let kvm = crate::arch::drivers::time::kvm::KVM_TIMER
+        let generic = crate::arch::drivers::time::generic::GENERIC_TIMER
             .get()
             .map(|t| t as &dyn KernelTimer);
-        let tsc = crate::arch::drivers::time::tsc::TSC_TIMER
-            .get()
-            .map(|t| t as &dyn KernelTimer);
-        let hpet = crate::arch::drivers::time::hpet::HPET_TIMER
-            .get()
-            .map(|t| t as &dyn KernelTimer);
+        // let tsc = crate::arch::drivers::time::tsc::TSC_TIMER
+        //     .get()
+        //     .map(|t| t as &dyn KernelTimer);
+        // let hpet = crate::arch::drivers::time::hpet::HPET_TIMER
+        //     .get()
+        //     .map(|t| t as &dyn KernelTimer);
 
-        let timers: [&Option<&dyn KernelTimer>; 3] = match state {
-            4..=5 => [&kvm, &tsc, &hpet],
-            2..=3 => [&kvm, &tsc, &None],
-            _ => [&None, &None, &None],
-        };
+        let timers: [&Option<&dyn KernelTimer>; 1] = [&generic];
 
         for timer_opt in timers {
             if let Some(timer) = *timer_opt {
@@ -101,7 +88,7 @@ pub fn preferred_timer_ns() -> u64 {
             }
         }
 
-        pit
+        0
     }
 }
 
@@ -136,7 +123,7 @@ pub struct TimerFuture {
 impl TimerFuture {
     pub fn new(duration_ticks: u64) -> Self {
         TimerFuture {
-            wake_at: preferred_timer_ms() as u64 + duration_ticks,
+            wake_at: preferred_timer_ms() + duration_ticks,
         }
     }
 }
@@ -145,7 +132,7 @@ impl Future for TimerFuture {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if preferred_timer_ms() as u64 >= self.wake_at {
+        if preferred_timer_ms() >= self.wake_at {
             Poll::Ready(())
         } else {
             register_sleep(self.wake_at, cx.waker().clone());
@@ -159,7 +146,7 @@ pub fn register_sleep(wake_at: u64, waker: Waker) {
 }
 
 pub fn wake_ready_tasks() {
-    let now = preferred_timer_ms() as u64;
+    let now = preferred_timer_ms();
     let tasks = unsafe { &mut SLEEPING_TASKS };
     let mut i = 0;
     while i < tasks.len() {

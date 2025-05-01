@@ -18,15 +18,13 @@ pub fn get_cpu() -> String {
             part3.eax, part3.ebx, part3.ecx, part3.edx,
         ];
 
-        let brand = brand_raw
+        brand_raw
             .iter()
             .flat_map(|reg| reg.to_le_bytes())
             .map(|b| b as char)
             .collect::<String>()
             .trim()
-            .to_string();
-
-        brand
+            .to_string()
     }
 }
 

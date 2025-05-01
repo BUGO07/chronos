@@ -3,16 +3,17 @@
     Released under EUPL 1.2 License
 */
 
-use crate::serial_print;
+use crate::{memory::get_memory_init_stage, serial_print};
 use alloc::vec::Vec;
 use core::{
     alloc::Layout,
     ffi::c_void,
     fmt::{self, Write},
     ptr::null_mut,
-    sync::atomic::Ordering,
 };
 use spin::Mutex;
+
+#[cfg(target_arch = "x86_64")]
 use x86_64::instructions::interrupts;
 
 use super::limine::get_framebuffers;
@@ -43,78 +44,97 @@ const FONT_SCALE_X: usize = 1;
 const FONT_SCALE_Y: usize = 1;
 const MARGIN: usize = 10;
 
-pub struct Cursor {
-    pub row: usize,
-    pub col: usize,
-}
+// pub struct Cursor {
+//     pub row: usize,
+//     pub col: usize,
+// }
 
-impl Cursor {
-    pub fn new() -> Self {
-        Self { row: 1, col: 1 }
-    }
+// impl Default for Cursor {
+//     fn default() -> Self {
+//         Self::new()
+//     }
+// }
 
-    pub fn move_to(&mut self, row: usize, col: usize) {
-        crate::print!("\x1b[{};{}H", row, col);
-    }
+// impl Cursor {
+//     pub fn new() -> Self {
+//         Self { row: 1, col: 1 }
+//     }
 
-    pub fn move_right(&mut self, n: usize) {
-        self.col += n;
-        crate::print!("\x1b[{}C", n);
-    }
+//     pub fn move_to(&mut self, row: usize, col: usize) {
+//         crate::print!("\x1b[{};{}H", row, col);
+//     }
 
-    pub fn move_left(&mut self, n: usize) {
-        self.col = self.col.saturating_sub(n);
-        crate::print!("\x1b[{}D", n);
-    }
-}
+//     pub fn move_right(&mut self, n: usize) {
+//         self.col += n;
+//         crate::print!("\x1b[{}C", n);
+//     }
+
+//     pub fn move_left(&mut self, n: usize) {
+//         self.col = self.col.saturating_sub(n);
+//         crate::print!("\x1b[{}D", n);
+//     }
+// }
 
 impl Writer {
     pub fn new() -> Vec<Writer> {
         let mut flanterm_contexts = Vec::new();
-        for framebuffer in get_framebuffers() {
-            unsafe {
-                flanterm_contexts.push(Writer {
-                    ctx: flanterm_sys::flanterm_fb_init(
-                        Some(malloc),
-                        Some(free),
-                        framebuffer.addr() as *mut u32,
-                        framebuffer.width() as usize,
-                        framebuffer.height() as usize,
-                        framebuffer.pitch() as usize,
-                        framebuffer.red_mask_size(),
-                        framebuffer.red_mask_shift(),
-                        framebuffer.green_mask_size(),
-                        framebuffer.green_mask_shift(),
-                        framebuffer.blue_mask_size(),
-                        framebuffer.blue_mask_shift(),
-                        null_mut(),
-                        null_mut(),
-                        null_mut(),
-                        null_mut(),
-                        null_mut(),
-                        null_mut(),
-                        null_mut(),
-                        include_bytes!("../../res/font.bin").as_ptr() as *mut core::ffi::c_void,
-                        FONT_WIDTH,
-                        FONT_HEIGHT,
-                        FONT_SPACING,
-                        FONT_SCALE_X,
-                        FONT_SCALE_Y,
-                        MARGIN,
-                    ),
-                });
+        #[cfg(not(feature = "uacpi_test"))]
+        {
+            for framebuffer in get_framebuffers() {
+                unsafe {
+                    flanterm_contexts.push(Writer {
+                        ctx: flanterm_sys::flanterm_fb_init(
+                            Some(malloc),
+                            Some(free),
+                            framebuffer.addr() as *mut u32,
+                            framebuffer.width() as usize,
+                            framebuffer.height() as usize,
+                            framebuffer.pitch() as usize,
+                            framebuffer.red_mask_size(),
+                            framebuffer.red_mask_shift(),
+                            framebuffer.green_mask_size(),
+                            framebuffer.green_mask_shift(),
+                            framebuffer.blue_mask_size(),
+                            framebuffer.blue_mask_shift(),
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            null_mut(),
+                            include_bytes!("../../res/font.bin").as_ptr() as *mut core::ffi::c_void,
+                            FONT_WIDTH,
+                            FONT_HEIGHT,
+                            FONT_SPACING,
+                            FONT_SCALE_X,
+                            FONT_SCALE_Y,
+                            MARGIN,
+                        ),
+                    });
+                }
             }
         }
-        return flanterm_contexts;
+        flanterm_contexts
     }
 
     pub fn write(&mut self, s: &str) {
-        unsafe { flanterm_sys::flanterm_write(self.ctx, s.as_ptr() as *const i8, s.len()) };
+        let buf;
+        #[cfg(target_arch = "x86_64")]
+        {
+            buf = s.as_ptr() as *const i8;
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            buf = s.as_ptr();
+        }
+        unsafe { flanterm_sys::flanterm_write(self.ctx, buf, s.len()) };
     }
 }
 
 impl fmt::Write for Writer {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        #[cfg(not(feature = "uacpi_test"))]
         self.write(s);
         Ok(())
     }
@@ -147,12 +167,16 @@ macro_rules! print_fill {
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     serial_print!("{}", args);
-    if crate::memory::MEMORY_INIT_STAGE.load(Ordering::Relaxed) > 0 {
-        interrupts::without_interrupts(|| {
+    if get_memory_init_stage() > 0 {
+        let closure = || {
             for writer in WRITERS.lock().iter_mut() {
                 writer.write_fmt(args).expect("Printing failed");
             }
-        });
+        };
+        #[cfg(target_arch = "x86_64")]
+        interrupts::without_interrupts(closure);
+        #[cfg(target_arch = "aarch64")]
+        closure();
     }
 }
 
@@ -166,8 +190,8 @@ pub fn _print_fill(what: &str, with: &str, newline: bool) {
     if newline {
         serial_print!("\n");
     }
-    if crate::memory::MEMORY_INIT_STAGE.load(Ordering::Relaxed) > 0 {
-        interrupts::without_interrupts(|| {
+    if get_memory_init_stage() > 0 {
+        let closure = || {
             for (i, writer) in WRITERS.lock().iter_mut().enumerate() {
                 let width = get_framebuffers().nth(i).unwrap().width() as usize;
                 let cols = (width - 2 * MARGIN) / (1 + FONT_WIDTH * FONT_SCALE_X);
@@ -191,6 +215,10 @@ pub fn _print_fill(what: &str, with: &str, newline: bool) {
                     writer.write("\n");
                 }
             }
-        });
+        };
+        #[cfg(target_arch = "x86_64")]
+        interrupts::without_interrupts(closure);
+        #[cfg(target_arch = "aarch64")]
+        closure();
     }
 }
