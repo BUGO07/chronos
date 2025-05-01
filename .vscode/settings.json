@@ -1,0 +1,8 @@
+{
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.cargo.buildScripts.rebuildOnSave": false,
+  "rust-analyzer.cargo.targetDir": true,
+  "rust-analyzer.cachePriming.enable": false,
+  "rust-analyzer.cargo.target": "x86_64-unknown-none", // i change this when im writing code for the other platform
+  "rust-analyzer.cargo.allTargets": false, // without this there's a weird harmless error
+}

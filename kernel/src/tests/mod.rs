@@ -30,7 +30,7 @@ fn test_runner(tests: &[&dyn Testable]) {
     }
 }
 
-pub fn init() -> ! {
+pub fn init() {
     println!("Basic tests...");
     test_runner(&[&add, &bool_check, &basic_loop]);
     println!("\nMemory tests...");
@@ -47,7 +47,7 @@ pub fn init() -> ! {
         &time::hpet_timer,
         &time::preferred_timer,
     ]);
-    crate::utils::exit_qemu(crate::utils::QemuExitCode::Success);
+    crate::arch::drivers::acpi::shutdown();
     halt_loop()
 }
 

@@ -20,13 +20,13 @@ pub fn send_eoi(irq: u8) {
     }
 }
 
-fn interrupts_enabled() -> bool {
-    let rflags: u64;
-    unsafe {
-        core::arch::asm!("pushfq; pop {}", out(reg) rflags);
-    }
-    (rflags & (1 << 9)) != 0
-}
+// fn interrupts_enabled() -> bool {
+//     let rflags: u64;
+//     unsafe {
+//         core::arch::asm!("pushfq; pop {}", out(reg) rflags);
+//     }
+//     (rflags & (1 << 9)) != 0
+// }
 
 pub fn unmask_all() {
     debug!("unmasking all irqs...");

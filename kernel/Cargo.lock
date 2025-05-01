@@ -3,6 +3,26 @@
 version = 4
 
 [[package]]
+name = "aarch64"
+version = "0.0.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2df0852593ebb4ed15e4fce123daf16a272b8d4449ae75050d6b9d7cea461a21"
+dependencies = [
+ "aarch64-cpu",
+ "memory_addresses",
+ "tock-registers",
+]
+
+[[package]]
+name = "aarch64-cpu"
+version = "10.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a21cd0131c25c438e19cd6a774adf7e3f64f7f4d723022882facc2dee0f8bc9"
+dependencies = [
+ "tock-registers",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10,6 +30,12 @@ checksum = "8e60d3430d3a69478ad0993f19238d2df97c507009a52b3c10addcd7f6bcb916"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "align-address"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ac6c08a67736554282858203cd9b7ff53cf55f54c34e85689962748a350cbf0"
 
 [[package]]
 name = "autocfg"
@@ -83,6 +109,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 name = "chronos"
 version = "0.1.0"
 dependencies = [
+ "aarch64",
  "conquer-once",
  "crossbeam-queue",
  "flanterm-sys",
@@ -94,7 +121,6 @@ dependencies = [
  "ps2-mouse",
  "spin 0.10.0",
  "talc",
- "tomling",
  "uacpi-sys",
  "x86_64 0.15.2",
 ]
@@ -250,6 +276,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
+name = "memory_addresses"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5db6d43eee0b2d75f589a87a7426d23ae207736ba74e3b83002de02ec646ffff"
+dependencies = [
+ "align-address",
+ "cfg-if",
+ "paste",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -270,6 +307,12 @@ dependencies = [
  "memchr",
  "minimal-lexical",
 ]
+
+[[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pc-keyboard"
@@ -416,13 +459,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "tomling"
-version = "0.2.0"
+name = "tock-registers"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32c8aacf149901ec6d6b345adb5707bb8f538cdc4077ce09e6e795e6a428da1f"
-dependencies = [
- "winnow",
-]
+checksum = "2b9e2fdb3a1e862c0661768b7ed25390811df1947a8acbfbefe09b47078d93c4"
 
 [[package]]
 name = "uacpi-sys"
@@ -507,12 +547,6 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
-
-[[package]]
-name = "winnow"
-version = "0.6.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e90edd2ac1aa278a5c4599b1d89cf03074b610800f866d4026dc199d7929a28"
 
 [[package]]
 name = "x86_64"

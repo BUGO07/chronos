@@ -9,8 +9,10 @@ override OUTPUT := chronos
 # Convenience macro to reliably declare user overridable variables.
 override USER_VARIABLE = $(if $(filter $(origin $(1)),default undefined),$(eval override $(1) := $(2)))
 
+$(call USER_VARIABLE,KARCH,x86_64)
+
 ifeq ($(RUST_TARGET),)
-    override RUST_TARGET := x86_64-unknown-none
+    override RUST_TARGET := $(KARCH)-unknown-none
 endif
 
 ifeq ($(RUST_PROFILE),)
@@ -25,21 +27,27 @@ ifeq ($(RUST_PROFILE),dev)
 endif
 
 # Default target.
-.PHONY: all
-all:
+.PHONY: $(KARCH)
+$(KARCH):
 	RUSTFLAGS=$(RUST_FLAGS) cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE)
-	cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/$$(cd target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR) && find -maxdepth 1 -perm -111 -type f) chronos
+	cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/$$(cd target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR) && find -maxdepth 1 -perm -111 -type f) chronos-$(KARCH)
 
 .PHONY: test
 test:
 	RUSTFLAGS=$(RUST_FLAGS) cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE) --features tests
-	cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/$$(cd target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR) && find -maxdepth 1 -perm -111 -type f) chronos_test
+	cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/$$(cd target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR) && find -maxdepth 1 -perm -111 -type f) chronos-test
+
+# add --features uacpi_test (crashes for some reason)
+.PHONY: uacpi-test
+uacpi-test:
+	RUSTFLAGS="-C relocation-model=static" cargo build --target $(RUST_TARGET) --profile smol
+	cp target/$(RUST_TARGET)/smol/$$(cd target/$(RUST_TARGET)/smol && find -maxdepth 1 -perm -111 -type f) chronos-uacpi-test
 
 # Remove object files and the final executable.
 .PHONY: clean
 clean:
 	cargo clean
-	rm -rf chronos
+	rm -rf chronos*
 
 .PHONY: distclean
 distclean: clean

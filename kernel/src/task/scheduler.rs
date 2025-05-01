@@ -7,6 +7,7 @@ use super::{Task, TaskId};
 use alloc::{collections::BTreeMap, sync::Arc, task::Wake};
 use core::task::{Context, Poll, Waker};
 use crossbeam_queue::ArrayQueue;
+#[cfg(target_arch = "x86_64")]
 use x86_64::instructions::interrupts::{self, enable_and_hlt};
 
 // lazy_static::lazy_static! {
@@ -17,6 +18,12 @@ pub struct Scheduler {
     tasks: BTreeMap<TaskId, Task>,
     task_queue: Arc<ArrayQueue<TaskId>>,
     waker_cache: BTreeMap<TaskId, Waker>,
+}
+
+impl Default for Scheduler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Scheduler {
@@ -70,11 +77,25 @@ impl Scheduler {
     }
 
     fn sleep_if_idle(&self) {
-        interrupts::disable();
-        if self.task_queue.is_empty() {
-            enable_and_hlt();
-        } else {
-            interrupts::enable();
+        #[cfg(target_arch = "x86_64")]
+        {
+            interrupts::disable();
+            if self.task_queue.is_empty() {
+                enable_and_hlt();
+            } else {
+                interrupts::enable();
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            // TODO
+            // aarch64::irq::disable();
+            // if self.task_queue.is_empty() {
+            //     aarch64::irq::enable();
+            //     aarch64::instructions::halt();
+            // } else {
+            //     aarch64::irq::enable();
+            // }
         }
     }
 }

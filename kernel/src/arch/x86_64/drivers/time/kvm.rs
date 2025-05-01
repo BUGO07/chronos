@@ -33,26 +33,34 @@ impl KvmTimer {
 }
 
 impl KernelTimer for KvmTimer {
-    fn elapsed_ns(&self) -> u64 {
-        let table = &self.table_pointer;
-        let mut time: u128 = unsafe { _rdtsc() as u128 } - table.tsc_timestamp as u128;
-        if table.tsc_shift >= 0 {
-            time <<= table.tsc_shift;
-        } else {
-            time >>= -table.tsc_shift;
-        }
-        time = (time * table.tsc_to_system_mul as u128) >> 32;
-        time = time + table.system_time as u128;
-
-        return time as u64 - unsafe { STARTUP_OFFSET };
+    fn is_supported(&self) -> bool {
+        self.supported
     }
 
-    fn is_supported(&self) -> bool {
-        return self.supported;
+    fn elapsed_ns(&self) -> u64 {
+        if self.supported {
+            let table = &self.table_pointer;
+            let mut time: u128 = unsafe { _rdtsc() as u128 } - table.tsc_timestamp as u128;
+            if table.tsc_shift >= 0 {
+                time <<= table.tsc_shift;
+            } else {
+                time >>= -table.tsc_shift;
+            }
+            time = (time * table.tsc_to_system_mul as u128) >> 32;
+            time += table.system_time as u128;
+
+            time as u64 - unsafe { STARTUP_OFFSET }
+        } else {
+            0
+        }
     }
 
     fn name(&self) -> &'static str {
         "KVM"
+    }
+
+    fn priority(&self) -> u8 {
+        0
     }
 }
 
@@ -93,7 +101,7 @@ pub fn supported() -> bool {
         let id = unsafe { __cpuid(0x40000001) };
         is_supported = (id.eax & (1 << 3)) != 0
     }
-    return is_supported;
+    is_supported
 }
 
 pub fn tsc_freq() -> u64 {
@@ -104,5 +112,5 @@ pub fn tsc_freq() -> u64 {
     } else {
         freq >>= table.tsc_shift;
     }
-    return freq;
+    freq
 }

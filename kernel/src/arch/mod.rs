@@ -1,11 +1,9 @@
-/*
-    Copyright (C) 2025 bugo07
-    Released under EUPL 1.2 License
-*/
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::*;
 
-pub mod device;
-pub mod drivers;
-pub mod gdt;
-pub mod interrupts;
-pub mod shell;
-pub mod system;
+#[cfg(target_arch = "x86_64")]
+mod x86_64;
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::*;

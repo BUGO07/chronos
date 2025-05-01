@@ -3,14 +3,13 @@
     Released under EUPL 1.2 License
 */
 
-use core::sync::atomic::Ordering;
+use core::{cell::OnceCell, sync::atomic::Ordering};
 
 use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
 use pc_keyboard::{DecodedKey, KeyCode};
-use spin::Mutex;
 
 use crate::{
     arch::drivers::time::{self, KernelTimer},
@@ -20,18 +19,18 @@ use crate::{
 
 use super::drivers::keyboard::ScancodeStream;
 
-lazy_static::lazy_static! {
-    pub static ref SHELL: Mutex<Shell> = Mutex::new(Shell::new());
+pub static mut SHELL: OnceCell<Shell> = OnceCell::new();
 
+lazy_static::lazy_static! {
     pub static ref INVISIBLE_CHARS: Vec<u8> = (0u8..=255)
         .filter(|&b| {
-            match b {
-                0x00..=0x1F | 0x7F => true,
-                0xA0 => true,
-                _ => false,
-            }
+            matches!(b, 0x00..=0x1F | 0x7F | 0xA0)
         })
         .collect();
+}
+
+pub fn init() {
+    unsafe { SHELL.set(Shell::new()).ok() };
 }
 
 pub struct Shell {
@@ -40,6 +39,12 @@ pub struct Shell {
     prev_commands: Vec<String>,
     color_fg: String,
     color_bg: String,
+}
+
+impl Default for Shell {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Shell {
@@ -66,7 +71,7 @@ impl Shell {
             DecodedKey::Unicode(character) => {
                 // backspace
                 if character == '\u{8}' {
-                    if self.input.len() > 0 {
+                    if !self.input.is_empty() {
                         print!("\x08 \x08");
                         self.input.pop();
                     }
@@ -83,7 +88,7 @@ impl Shell {
                     );
                     let mut split_input = raw_input.split(" ");
                     let cmd = split_input.next().unwrap();
-                    let args = Vec::from_iter(split_input.into_iter());
+                    let args = Vec::from_iter(split_input);
                     run_command(cmd, args, self);
                     self.prev_commands.reverse();
                     self.last_commands.append(&mut self.prev_commands);
@@ -101,9 +106,9 @@ impl Shell {
             }
             DecodedKey::RawKey(key) => match key {
                 KeyCode::ArrowUp => {
-                    if self.last_commands.len() > 0 {
+                    if !self.last_commands.is_empty() {
                         print_fill!("\x08 \x08", "", false);
-                        if self.input.len() > 0 {
+                        if !self.input.is_empty() {
                             self.prev_commands
                                 .push(String::from_utf8(self.input.clone()).unwrap());
                         }
@@ -115,13 +120,13 @@ impl Shell {
                 }
                 KeyCode::ArrowDown => {
                     print_fill!("\x08 \x08", "", false);
-                    if self.input.len() > 0 {
+                    if !self.input.is_empty() {
                         self.last_commands
                             .push(String::from_utf8(self.input.clone()).unwrap());
                     }
                     self.input.clear();
                     self.input.clear();
-                    if self.prev_commands.len() > 0 {
+                    if !self.prev_commands.is_empty() {
                         let last_input = self.prev_commands.pop().unwrap();
                         self.input = last_input.as_bytes().to_vec();
                         print!("$ {}", last_input);
@@ -159,7 +164,7 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             )
         }
         "time" => {
-            let digits = if args.len() != 0 {
+            let digits = if !args.is_empty() {
                 args[0].parse().unwrap_or(5).clamp(0, 9)
             } else {
                 5
@@ -189,12 +194,12 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             }
         }
         "date" => {
-            let config = crate::utils::config::get_config();
-            let zone = if args.len() == 0 {
-                config.time.zone_offset
+            let zone = if args.is_empty() {
+                // config.time.zone_offset
+                crate::utils::config::ZONE_OFFSET
             } else {
-                args[0].parse().unwrap_or(config.time.zone_offset)
-            } as i16;
+                args[0].parse().unwrap_or(crate::utils::config::ZONE_OFFSET)
+            };
 
             let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
                 .with_timezone_offset(zone)
@@ -209,9 +214,9 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             print!("\x1b[2J\x1b[H");
         }
         "color" => {
-            let fg = if args.len() != 0 {
+            let fg = if !args.is_empty() {
                 match args[0] {
-                    "0" => color::BLACK.to_string(), // invisible when bg is black :/
+                    "0" => color::BLACK.to_string(),
                     "1" => color::BLUE.to_string(),
                     "2" => color::GREEN.to_string(),
                     "3" => color::CYAN.to_string(),
@@ -234,9 +239,9 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                                 return false;
                             }
                             let is_valid_hex = |h: u8| -> bool {
-                                (h >= b'0' && h <= b'9')
-                                    || (h >= b'a' && h <= b'f')
-                                    || (h >= b'A' && h <= b'F')
+                                h.is_ascii_digit()
+                                    || (b'a'..=b'f').contains(&h)
+                                    || (b'A'..=b'F').contains(&h)
                             };
                             let mut valid = true;
                             for i in 1..7 {
@@ -245,15 +250,11 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                                     break;
                                 }
                             }
-                            return valid;
+                            valid
                         };
                         if is_valid(x) {
-                            color::rgb(
-                                x[1..3].as_bytes()[0],
-                                x[3..5].as_bytes()[0],
-                                x[5..7].as_bytes()[0],
-                                false,
-                            )
+                            let bytes = x.as_bytes();
+                            color::rgb(bytes[1..3][0], bytes[3..5][0], bytes[5..7][0], false)
                         } else {
                             color::RESET.to_string()
                         }
@@ -275,7 +276,7 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
         }
         "bg" => {
             // repeated code ik
-            let bg = if args.len() != 0 {
+            let bg = if !args.is_empty() {
                 match args[0] {
                     "0" => color::BLACK_BG.to_string(),
                     "1" => color::BLUE_BG.to_string(),
@@ -300,9 +301,9 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                                 return false;
                             }
                             let is_valid_hex = |h: u8| -> bool {
-                                (h >= b'0' && h <= b'9')
-                                    || (h >= b'a' && h <= b'f')
-                                    || (h >= b'A' && h <= b'F')
+                                h.is_ascii_digit()
+                                    || (b'a'..=b'f').contains(&h)
+                                    || (b'A'..=b'F').contains(&h)
                             };
                             let mut valid = true;
                             for i in 1..7 {
@@ -311,15 +312,11 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                                     break;
                                 }
                             }
-                            return valid;
+                            valid
                         };
                         if is_valid(x) {
-                            color::rgb(
-                                x[1..3].as_bytes()[0],
-                                x[3..5].as_bytes()[0],
-                                x[5..7].as_bytes()[0],
-                                true,
-                            )
+                            let bytes = x.as_bytes();
+                            color::rgb(bytes[1..3][0], bytes[3..5][0], bytes[5..7][0], true)
                         } else {
                             color::RESET.to_string()
                         }

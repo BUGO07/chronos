@@ -13,9 +13,9 @@ use uacpi_sys::*;
 
 use super::KernelTimer;
 
-static mut HPET_ADDRESS: u64 = 0;
-
 pub static mut HPET_TIMER: OnceCell<HpetTimer> = OnceCell::new();
+
+static mut HPET_ADDRESS: u64 = 0;
 
 pub struct HpetTimer {
     start: u64,
@@ -65,6 +65,10 @@ impl KernelTimer for HpetTimer {
     fn name(&self) -> &'static str {
         "HPET"
     }
+
+    fn priority(&self) -> u8 {
+        20
+    }
 }
 
 fn hpet_read(offset: u64) -> u64 {
@@ -90,14 +94,16 @@ pub fn init() {
     let address = paddr + get_hhdm_offset();
 
     info!("mapping hpet address: 0x{:X} -> 0x{:X}", paddr, address);
-    crate::memory::vmm::PAGEMAP.lock().map(
-        paddr + get_hhdm_offset(),
-        paddr,
-        flag::PRESENT | flag::WRITE,
-        page_size::SMALL,
-    );
+    unsafe {
+        crate::memory::vmm::PAGEMAP.get_mut().unwrap().map(
+            paddr + get_hhdm_offset(),
+            paddr,
+            flag::PRESENT | flag::WRITE,
+            page_size::SMALL,
+        )
+    };
 
-    let capabilities = hpet_read(0x000) as u64;
+    let capabilities = hpet_read(0x000);
 
     let mut config = hpet_read(0x010);
     config |= 1;
@@ -135,6 +141,6 @@ fn supported() -> bool {
 
         uacpi_table_unref(&mut table as *mut uacpi_table);
 
-        return true;
+        true
     }
 }

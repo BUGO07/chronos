@@ -22,6 +22,12 @@ pub struct MouseInfo {
     state: MouseState,
 }
 
+impl Default for MouseInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MouseInfo {
     pub fn new() -> MouseInfo {
         MouseInfo {
@@ -51,14 +57,14 @@ fn on_complete(mouse_state: MouseState) {
     if mouse_state.x_moved() {
         let x_movement = mouse_state.get_x();
         if x_movement > 0 {
-            let added = mouse.x as u32 + x_movement.abs() as u32;
+            let added = mouse.x as u32 + x_movement.unsigned_abs() as u32;
             if added <= u16::MAX as u32 {
-                mouse.x += x_movement.abs() as u16;
+                mouse.x += x_movement.unsigned_abs();
             }
         } else if x_movement < 0 {
-            let subtracted = mouse.x as i16 - x_movement.abs() as i16;
+            let subtracted = mouse.x as i16 - x_movement.abs();
             if subtracted >= 0 {
-                mouse.x -= x_movement.abs() as u16;
+                mouse.x -= x_movement.unsigned_abs();
             }
         }
     }
@@ -66,29 +72,21 @@ fn on_complete(mouse_state: MouseState) {
     if mouse_state.y_moved() {
         let y_movement = mouse_state.get_y();
         if y_movement > 0 {
-            let added = mouse.y as u32 + y_movement.abs() as u32;
+            let added = mouse.y as u32 + y_movement.unsigned_abs() as u32;
             if added <= u16::MAX as u32 {
-                mouse.y += y_movement.abs() as u16;
+                mouse.y += y_movement.unsigned_abs();
             }
         } else if y_movement < 0 {
-            let subtracted = mouse.y as i16 - y_movement.abs() as i16;
+            let subtracted = mouse.y as i16 - y_movement.abs();
             if subtracted >= 0 {
-                mouse.y -= y_movement.abs() as u16;
+                mouse.y -= y_movement.unsigned_abs();
             }
         }
     }
 
-    if mouse_state.left_button_down() {
-        mouse.left = true;
-    } else {
-        mouse.left = false;
-    }
+    mouse.left = mouse_state.left_button_down();
 
-    if mouse_state.right_button_down() {
-        mouse.right = true;
-    } else {
-        mouse.right = false;
-    }
+    mouse.right = mouse_state.right_button_down();
 
     mouse.state = mouse_state;
 }

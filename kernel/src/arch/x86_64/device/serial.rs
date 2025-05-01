@@ -11,8 +11,8 @@ pub struct SerialWriter;
 
 impl Write for SerialWriter {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        for byte in s.chars() {
-            unsafe { Port::new(0xe9).write(byte as u8) };
+        for byte in s.bytes() {
+            unsafe { Port::new(0xe9).write(byte) };
         }
         Ok(())
     }
@@ -21,7 +21,7 @@ impl Write for SerialWriter {
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
     interrupts::without_interrupts(|| {
-        write!(SerialWriter, "{}", args).ok();
+        write!(SerialWriter, "{args}").ok();
     });
 }
 
