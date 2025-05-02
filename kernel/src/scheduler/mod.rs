@@ -3,16 +3,14 @@
     Released under EUPL 1.2 License
 */
 
-use super::{Task, TaskId};
 use alloc::{collections::BTreeMap, sync::Arc, task::Wake};
 use core::task::{Context, Poll, Waker};
 use crossbeam_queue::ArrayQueue;
+use task::{Task, TaskId};
 #[cfg(target_arch = "x86_64")]
 use x86_64::instructions::interrupts::{self, enable_and_hlt};
 
-// lazy_static::lazy_static! {
-//     pub static ref SCHEDULER: Mutex<Scheduler>  = Mutex::new(Scheduler::new());
-// }
+pub mod task;
 
 pub struct Scheduler {
     tasks: BTreeMap<TaskId, Task>,

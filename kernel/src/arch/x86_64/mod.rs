@@ -13,7 +13,7 @@ use crate::{
     NOOO, debug, info,
     memory::get_usable_memory,
     print, print_fill, println,
-    task::{Task, scheduler::Scheduler},
+    scheduler::{Scheduler, task::Task},
     utils::{
         halt_loop,
         limine::{get_bootloader_info, get_framebuffers},
@@ -41,6 +41,7 @@ pub fn _start() -> ! {
     info!("x86_64 kernel starting...\n");
 
     crate::memory::init();
+    crate::arch::system::cpu::init_bsp();
     crate::arch::gdt::init();
     crate::arch::interrupts::init_idt();
     crate::arch::interrupts::pic::init();
@@ -57,6 +58,7 @@ pub fn _start() -> ! {
     crate::arch::drivers::acpi::shutdown();
 
     crate::arch::drivers::time::init();
+    crate::arch::system::cpu::init();
     crate::arch::device::pci::pci_enumerate();
 
     crate::arch::drivers::mouse::init();

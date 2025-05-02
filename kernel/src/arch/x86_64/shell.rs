@@ -73,6 +73,7 @@ impl Shell {
     }
 
     pub fn key_event(&mut self, dc: DecodedKey, scancodes: &ScancodeStream) {
+        print!("\x1b[?25h");
         match scancodes.keys_down.as_slice() {
             [KeyCode::LControl, KeyCode::C] => {
                 print!("^C\n$ ");
@@ -369,6 +370,11 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
         "sleep" => {
             crate::arch::drivers::acpi::perform_power_action(
                 super::drivers::acpi::PowerAction::Sleep,
+            );
+        }
+        "hibernate" => {
+            crate::arch::drivers::acpi::perform_power_action(
+                super::drivers::acpi::PowerAction::Hibernate,
             );
         }
         "pagefault" => {

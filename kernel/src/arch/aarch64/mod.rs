@@ -9,7 +9,7 @@ use crate::{
     NOOO, error, info,
     memory::get_usable_memory,
     print_fill, println,
-    task::scheduler::Scheduler,
+    scheduler::Scheduler,
     utils::{
         halt_loop,
         limine::{get_bootloader_info, get_framebuffers},
@@ -22,7 +22,7 @@ pub mod drivers;
 
 pub fn _start() -> ! {
     println!("\n{NOOO}\n");
-    info!("x86_64 kernel starting...\n");
+    info!("aarch64 kernel starting...\n");
 
     self::drivers::time::early_init();
     crate::memory::init();

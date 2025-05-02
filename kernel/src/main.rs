@@ -23,7 +23,7 @@ pub const NOOO: &str = include_str!("../res/nooo.txt");
 pub mod arch;
 
 pub mod memory;
-pub mod task;
+pub mod scheduler;
 pub mod utils;
 
 #[cfg(feature = "tests")]
