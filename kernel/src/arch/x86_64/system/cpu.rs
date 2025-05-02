@@ -3,12 +3,67 @@
     Released under EUPL 1.2 License
 */
 
-// ! idk if this works, its temporary
-
 use core::{
     arch::{asm, x86_64::__cpuid},
+    cell::OnceCell,
     ffi::c_void,
 };
+
+use crossbeam_queue::ArrayQueue;
+use limine::mp::Cpu;
+
+use crate::{info, scheduler::Scheduler, utils::limine::get_mp_response};
+
+static mut CPU_COUNT: usize = 0;
+static mut PROCESSORS: OnceCell<ArrayQueue<&Cpu>> = OnceCell::new();
+
+pub fn init_bsp() {
+    let mp = get_mp_response();
+    let bsp_id = mp.bsp_lapic_id();
+    let cpus = mp.cpus_mut();
+    let cpu_count = cpus.len();
+    unsafe { CPU_COUNT = cpu_count };
+
+    unsafe { PROCESSORS.set(ArrayQueue::new(cpu_count)).unwrap() };
+
+    for cpu in cpus {
+        if bsp_id != cpu.lapic_id {
+            continue;
+        }
+
+        info!("initializing bsp {}: lapic id: {}", cpu.id, cpu.lapic_id);
+
+        unsafe { PROCESSORS.get().unwrap().push(cpu).ok() };
+    }
+}
+
+pub fn init() {
+    let mp = get_mp_response();
+    let bsp_id = mp.bsp_lapic_id();
+
+    let processors = unsafe { PROCESSORS.get().unwrap() };
+
+    let mut idx = 0;
+    for cpu in mp.cpus_mut() {
+        idx += 1;
+        if bsp_id == cpu.lapic_id {
+            continue;
+        }
+
+        info!("initializing cpu {}: lapic id: {}", cpu.id, cpu.lapic_id);
+
+        cpu.extra = idx;
+        processors.push(cpu).ok();
+        cpu.goto_address.write(cpu_entry);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn cpu_entry(_cpu: &limine::mp::Cpu) -> ! {
+    // todo
+    let mut scheduler = Scheduler::new();
+    scheduler.run()
+}
 
 #[derive(Debug)]
 pub struct Registers {

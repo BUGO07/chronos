@@ -79,11 +79,18 @@ pub fn sleep() {
     }
 }
 
+pub fn hibernate() {
+    unsafe {
+        uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S4);
+        uacpi_enter_sleep_state(UACPI_SLEEP_STATE_S4);
+    }
+}
+
 pub enum PowerAction {
     Shutdown,
     Reboot,
     Sleep,
-    Hibernate, // todo
+    Hibernate,
 }
 
 pub fn perform_power_action(action: PowerAction) {
@@ -103,6 +110,10 @@ pub fn perform_power_action(action: PowerAction) {
             sleep();
             error!("Couldn't sleep...");
         }
-        _ => {}
+        PowerAction::Hibernate => {
+            println!("Hibernating...");
+            hibernate();
+            error!("Couldn't hibernate...");
+        }
     }
 }

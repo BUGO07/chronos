@@ -9,9 +9,10 @@ use limine::{
     memory_map::Entry,
     request::{
         BootloaderInfoRequest, ExecutableAddressRequest, ExecutableFileRequest, FramebufferRequest,
-        HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker, RsdpRequest,
+        HhdmRequest, MemoryMapRequest, MpRequest, RequestsEndMarker, RequestsStartMarker,
+        RsdpRequest,
     },
-    response::{BootloaderInfoResponse, ExecutableAddressResponse},
+    response::{BootloaderInfoResponse, ExecutableAddressResponse, MpResponse},
 };
 
 #[used]
@@ -44,6 +45,10 @@ pub static EXECUTABLE_FILE_REQUEST: ExecutableFileRequest = ExecutableFileReques
 
 #[used]
 #[unsafe(link_section = ".requests")]
+pub static mut MP_REQUEST: MpRequest = MpRequest::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
 pub static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
 
 #[used]
@@ -68,6 +73,10 @@ pub fn get_executable_address() -> &'static ExecutableAddressResponse {
 
 pub fn get_executable_file() -> &'static File {
     EXECUTABLE_FILE_REQUEST.get_response().unwrap().file()
+}
+
+pub fn get_mp_response() -> &'static mut MpResponse {
+    unsafe { MP_REQUEST.get_response_mut().unwrap() }
 }
 
 pub fn get_rsdp_address() -> usize {
