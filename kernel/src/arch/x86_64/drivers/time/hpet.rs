@@ -4,7 +4,7 @@
 */
 
 use crate::{
-    debug, info,
+    info,
     memory::vmm::{flag, page_size},
     utils::limine::get_hhdm_offset,
 };
@@ -116,7 +116,7 @@ pub fn init() {
             ))
             .ok()
     };
-    debug!("done");
+    info!("done");
 }
 
 fn supported() -> bool {

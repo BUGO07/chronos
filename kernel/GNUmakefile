@@ -19,6 +19,12 @@ ifeq ($(RUST_PROFILE),)
     override RUST_PROFILE := dev
 endif
 
+ifeq ($(KARCH),aarch64)
+	ifeq ($(RUST_PROFILE),release)
+		override RUST_PROFILE := armrel
+	endif
+endif
+
 override RUST_PROFILE_SUBDIR := $(RUST_PROFILE)
 override RUST_FLAGS := "-C relocation-model=static"
 ifeq ($(RUST_PROFILE),dev)
@@ -40,8 +46,8 @@ test:
 # add --features uacpi_test (crashes for some reason)
 .PHONY: uacpi-test
 uacpi-test:
-	RUSTFLAGS="-C relocation-model=static" cargo build --target $(RUST_TARGET) --profile smol
-	cp target/$(RUST_TARGET)/smol/$$(cd target/$(RUST_TARGET)/smol && find -maxdepth 1 -perm -111 -type f) chronos-uacpi-test
+	RUSTFLAGS="-C relocation-model=static" cargo build --target $(RUST_TARGET) --profile release
+	cp target/$(RUST_TARGET)/release/$$(cd target/$(RUST_TARGET)/release && find -maxdepth 1 -perm -111 -type f) chronos-uacpi-test
 
 # Remove object files and the final executable.
 .PHONY: clean

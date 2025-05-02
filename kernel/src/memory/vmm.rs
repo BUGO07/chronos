@@ -156,6 +156,7 @@ pub fn init() {
             continue;
         }
 
+        // ! hard setting this to LARGE stop my laptop from crashing
         let psize = if entry.length >= page_size::LARGE {
             page_size::LARGE
         } else if entry.length >= page_size::MEDIUM {
@@ -203,5 +204,5 @@ pub fn init() {
         // TODO:
     }
     unsafe { PAGEMAP.set(pmap).ok() };
-    debug!("done");
+    info!("done");
 }

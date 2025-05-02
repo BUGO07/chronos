@@ -10,7 +10,7 @@ use core::{
 
 use alloc::sync::Arc;
 
-use crate::{debug, info, utils::limine::get_hhdm_offset};
+use crate::{info, utils::limine::get_hhdm_offset};
 
 use super::KernelTimer;
 
@@ -88,7 +88,7 @@ pub fn init() {
         unsafe {
             STARTUP_OFFSET = timer.elapsed_ns() - (super::pit::current_pit_ticks() / 1_000_000)
         };
-        debug!("done");
+        info!("done");
     }
 
     unsafe { KVM_TIMER.set(timer).ok() };

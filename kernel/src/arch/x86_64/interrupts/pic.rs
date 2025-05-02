@@ -20,13 +20,13 @@ pub fn send_eoi(irq: u8) {
     }
 }
 
-// fn interrupts_enabled() -> bool {
-//     let rflags: u64;
-//     unsafe {
-//         core::arch::asm!("pushfq; pop {}", out(reg) rflags);
-//     }
-//     (rflags & (1 << 9)) != 0
-// }
+pub fn interrupts_enabled() -> bool {
+    let rflags: u64;
+    unsafe {
+        core::arch::asm!("pushfq; pop {}", out(reg) rflags);
+    }
+    (rflags & (1 << 9)) != 0
+}
 
 pub fn unmask_all() {
     debug!("unmasking all irqs...");
@@ -34,7 +34,7 @@ pub fn unmask_all() {
         Port::new(0x21).write(0u8);
         Port::new(0xA1).write(0u8);
     }
-    debug!("done");
+    info!("done");
 }
 
 pub fn mask_all() {
@@ -43,7 +43,7 @@ pub fn mask_all() {
         Port::new(0x21).write(0xffu8);
         Port::new(0xA1).write(0xffu8);
     }
-    debug!("done");
+    info!("done");
 }
 
 pub fn init() {

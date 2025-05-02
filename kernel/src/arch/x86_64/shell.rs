@@ -17,7 +17,7 @@ use crate::{
     utils::logger::color,
 };
 
-use super::drivers::keyboard::ScancodeStream;
+use super::drivers::{keyboard::ScancodeStream, time::TimerFuture};
 
 pub static mut SHELL: OnceCell<Shell> = OnceCell::new();
 
@@ -29,8 +29,22 @@ lazy_static::lazy_static! {
         .collect();
 }
 
-pub fn init() {
+pub async fn shell_task() {
     unsafe { SHELL.set(Shell::new()).ok() };
+    print!("$ ");
+
+    let mut visible = true;
+
+    loop {
+        if visible {
+            print!("\x1b[?25l");
+        } else {
+            print!("\x1b[?25h");
+        }
+        visible = !visible;
+
+        TimerFuture::new(700).await
+    }
 }
 
 pub struct Shell {

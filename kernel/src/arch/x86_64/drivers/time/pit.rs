@@ -8,7 +8,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use alloc::{format, string::String};
 use x86_64::instructions::port::Port;
 
-use crate::{debug, info};
+use crate::info;
 
 use super::wake_ready_tasks;
 
@@ -22,7 +22,7 @@ pub fn init() {
         Port::new(0x40).write((PIT_FREQUENCY / 1000) >> 8);
     }
 
-    debug!("done");
+    info!("done");
 }
 
 pub extern "x86-interrupt" fn timer_interrupt_handler(

@@ -59,8 +59,6 @@ pub fn _start() -> ! {
     crate::arch::drivers::time::init();
     crate::arch::device::pci::pci_enumerate();
 
-    crate::arch::shell::init();
-
     crate::arch::drivers::mouse::init();
 
     println!();
@@ -125,13 +123,11 @@ pub fn _start() -> ! {
 
     info!("icl ts pmo ♥");
 
-    // for now
-    print!("$ ");
-
     let mut scheduler = Scheduler::new();
     scheduler.spawn(Task::new(
         crate::arch::drivers::keyboard::handle_keypresses(),
     ));
+    scheduler.spawn(Task::new(crate::arch::shell::shell_task()));
     // scheduler.spawn(Task::new(async {
     //     let cpu_freq = measure_cpu_frequency_async().await;
     //     if cpu_freq == 0 {

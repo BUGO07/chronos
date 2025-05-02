@@ -7,7 +7,7 @@ use core::cell::OnceCell;
 
 use aarch64::regs::{CNTFRQ_EL0, CNTPCT_EL0, Readable};
 
-use crate::{debug, info};
+use crate::info;
 
 use super::KernelTimer;
 
@@ -76,5 +76,5 @@ pub fn init() {
             .set(GenericTimer::start(CNTFRQ_EL0.get()))
             .ok();
     }
-    debug!("done");
+    info!("done");
 }

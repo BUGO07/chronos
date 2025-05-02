@@ -7,7 +7,7 @@ use ps2_mouse::{Mouse, MouseState};
 use spin::Mutex;
 use x86_64::{instructions::port::PortReadOnly, structures::idt::InterruptStackFrame};
 
-use crate::{arch::interrupts::IDT, debug, error, info};
+use crate::{arch::interrupts::IDT, error, info};
 
 lazy_static::lazy_static! {
     pub static ref DRIVER: Mutex<Mouse> = Mutex::new(Mouse::new());
@@ -48,7 +48,7 @@ pub fn init() {
             error!("failed to initialize ps/2 mouse: {}", err);
         }
         DRIVER.lock().set_on_complete(on_complete);
-        debug!("done");
+        info!("done");
     });
 }
 

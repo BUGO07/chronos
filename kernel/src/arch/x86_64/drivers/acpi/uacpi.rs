@@ -14,7 +14,7 @@ use core::{
 use alloc::{boxed::Box, collections::btree_map::BTreeMap};
 use spin::{Mutex, mutex::SpinMutex};
 use uacpi_sys::*;
-use x86_64::{VirtAddr, align_down, align_up, instructions::port::Port};
+use x86_64::{VirtAddr, instructions::port::Port};
 
 use crate::{
     arch::{
@@ -26,7 +26,7 @@ use crate::{
     },
     debug, error, info,
     memory::vmm::{PAGEMAP, flag, page_size},
-    utils::limine::get_rsdp_address,
+    utils::{align_down, align_up, limine::get_rsdp_address},
     warn,
 };
 
@@ -312,8 +312,8 @@ unsafe extern "C" fn uacpi_kernel_sleep(msec: uacpi_u64) {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn uacpi_kernel_create_mutex() -> uacpi_handle {
-    let lock = Box::new(Mutex::new(()));
-    Box::into_raw(lock) as *mut c_void
+    let mutex = Box::new(Mutex::new(()));
+    Box::into_raw(mutex) as *mut c_void
 }
 
 #[unsafe(no_mangle)]
@@ -365,14 +365,41 @@ unsafe extern "C" fn uacpi_kernel_get_thread_id() -> uacpi_thread_id {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn uacpi_kernel_acquire_mutex(
-    _handle: uacpi_handle,
-    _timeout: uacpi_u16,
+    handle: uacpi_handle,
+    timeout: uacpi_u16,
 ) -> uacpi_status {
-    UACPI_STATUS_OK
+    let mutex = unsafe { &*(handle as *const Mutex<()>) };
+    let mut locked = None;
+
+    match timeout {
+        0xFFFF => {
+            mutex.lock();
+            return UACPI_STATUS_OK;
+        }
+        0x0000 => {
+            let time = crate::arch::drivers::time::preferred_timer_ms();
+            while crate::arch::drivers::time::preferred_timer_ms() < time + timeout as u64 {
+                locked = mutex.try_lock();
+                if locked.is_none() {
+                    unsafe { uacpi_kernel_sleep(1) };
+                }
+            }
+        }
+        _ => locked = mutex.try_lock(),
+    }
+
+    if locked.is_some() {
+        UACPI_STATUS_OK
+    } else {
+        UACPI_STATUS_TIMEOUT
+    }
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_release_mutex(_handle: uacpi_handle) {}
+unsafe extern "C" fn uacpi_kernel_release_mutex(handle: uacpi_handle) {
+    let mutex = unsafe { &*(handle as *const Mutex<()>) };
+    unsafe { mutex.force_unlock() };
+}
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn uacpi_kernel_wait_for_event(
@@ -488,15 +515,22 @@ unsafe extern "C" fn uacpi_kernel_create_spinlock() -> uacpi_handle {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn uacpi_kernel_free_spinlock(handle: uacpi_handle) {
     if !handle.is_null() {
-        drop(unsafe { Box::from_raw(handle as *mut SpinMutex<()>) });
+        let _ = unsafe { Box::from_raw(handle as *mut SpinMutex<()>) };
     }
 }
+
+static mut INTS_ENABLED: bool = true;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flags {
     if !handle.is_null() {
-        let lock = unsafe { &*(handle as *mut SpinMutex<()>) };
+        let ints_enabled = crate::arch::interrupts::pic::interrupts_enabled();
+        if ints_enabled {
+            x86_64::instructions::interrupts::disable();
+        }
+        let lock = unsafe { &*(handle as *const SpinMutex<()>) };
         lock.lock();
+        unsafe { INTS_ENABLED = ints_enabled };
     }
     0
 }
@@ -504,8 +538,11 @@ unsafe extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_c
 #[unsafe(no_mangle)]
 unsafe extern "C" fn uacpi_kernel_unlock_spinlock(handle: uacpi_handle) {
     if !handle.is_null() {
-        let lock = unsafe { &*(handle as *mut SpinMutex<()>) };
+        let lock = unsafe { &*(handle as *const SpinMutex<()>) };
         unsafe { lock.force_unlock() };
+        if unsafe { INTS_ENABLED } {
+            x86_64::instructions::interrupts::enable();
+        }
     }
 }
 

@@ -58,7 +58,7 @@ pub fn init() {
             }
         }
 
-        debug!("done");
+        info!("done");
         MEMORY_INIT_STAGE = 1;
     }
     #[cfg(target_arch = "x86_64")]
