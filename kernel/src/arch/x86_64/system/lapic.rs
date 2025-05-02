@@ -64,7 +64,7 @@ pub fn init() {
     calibrate_timer();
     arm(250_000_000, 0xFF);
 
-    debug!("done");
+    info!("done");
 }
 
 extern "x86-interrupt" fn lapic_oneshot_timer_handler(

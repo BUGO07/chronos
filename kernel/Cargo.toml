@@ -9,7 +9,7 @@ opt-level = 1
 lto = "thin" # makes performance 10x with no noticable difference in compile time
 
 [profile.release]
-opt-level = 1 # bootloop on 2 and 3 // "z" sometimes has better performance
+opt-level = 3 # wtf no bootloop on x86_64 either makes 0 sense but i'll accept it
 codegen-units = 1
 strip = true
 lto = "fat"
@@ -17,6 +17,13 @@ lto = "fat"
 [profile.smol]
 inherits = "release"
 opt-level = "z"
+codegen-units = 1
+strip = true
+lto = "fat"
+
+[profile.armrel]
+inherits = "release"
+opt-level = 3 # no bootloop on aarch64
 codegen-units = 1
 strip = true
 lto = "fat"

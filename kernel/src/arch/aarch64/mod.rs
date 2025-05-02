@@ -24,6 +24,7 @@ pub fn _start() -> ! {
     println!("\n{NOOO}\n");
     info!("x86_64 kernel starting...\n");
 
+    self::drivers::time::early_init();
     crate::memory::init();
 
     println!();

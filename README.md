@@ -33,10 +33,9 @@ Contributors are welcome.
 
 ## Known Bugs/Issues
 
-- Sometimes address overflow in vmm on real hardware in debug builds.
-- Double fault on my laptop when booting for unknown reason.
+- Address overflow in vmm on my laptop in debug builds.
+- Crash on my laptop when setting the pagetable (this is fixed by hardsetting the pagesize to LARGE).
 - No way to wake up from sleep yet.
-- Opt-level 2 and 3 cause a bootloop.
 - Using the keyboard before `up and running` makes keyboard and mouse not work
 
 ## Building And Running

@@ -5,7 +5,7 @@
 
 use core::{arch::x86_64::_rdtsc, cell::OnceCell, sync::atomic::Ordering};
 
-use crate::{debug, info};
+use crate::info;
 
 use super::{KernelTimer, TimerFuture, pit::current_pit_ticks};
 
@@ -118,6 +118,6 @@ pub fn init() {
         info!("cpu frequency - {}hz", freq);
         crate::arch::x86_64::CPU_FREQ.store(freq, Ordering::Relaxed);
         TSC_TIMER.get_mut().unwrap().set_supported(true);
-        debug!("done");
+        info!("done");
     }
 }
