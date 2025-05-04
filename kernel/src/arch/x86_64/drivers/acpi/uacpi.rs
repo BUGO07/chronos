@@ -14,15 +14,12 @@ use core::{
 use alloc::{boxed::Box, collections::btree_map::BTreeMap};
 use spin::{Mutex, mutex::SpinMutex};
 use uacpi_sys::*;
-use x86_64::{VirtAddr, instructions::port::Port};
+use x86_64::instructions::port::Port;
 
 use crate::{
-    arch::{
-        device::pci::{
-            PciAddress, pci_config_read_u8, pci_config_read_u16, pci_config_read_u32,
-            pci_config_write_u8, pci_config_write_u16, pci_config_write_u32,
-        },
-        interrupts::IDT,
+    arch::device::pci::{
+        PciAddress, pci_config_read_u8, pci_config_read_u16, pci_config_read_u32,
+        pci_config_write_u8, pci_config_write_u16, pci_config_write_u32,
     },
     debug, error, info,
     memory::vmm::{PAGEMAP, flag, page_size},
@@ -31,7 +28,7 @@ use crate::{
 };
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_get_rsdp(out_rsdp_address: *mut uacpi_phys_addr) -> uacpi_status {
+extern "C" fn uacpi_kernel_get_rsdp(out_rsdp_address: *mut uacpi_phys_addr) -> uacpi_status {
     unsafe { *out_rsdp_address = get_rsdp_address() as uacpi_phys_addr };
     UACPI_STATUS_OK
 }
@@ -40,7 +37,7 @@ static NEXT_HANDLE: AtomicUsize = AtomicUsize::new(1);
 static PCI_HANDLES: Mutex<BTreeMap<usize, PciAddress>> = Mutex::new(BTreeMap::new());
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_pci_device_open(
+extern "C" fn uacpi_kernel_pci_device_open(
     address: uacpi_pci_address,
     handle: *mut uacpi_handle,
 ) -> uacpi_status {
@@ -57,13 +54,13 @@ pub unsafe extern "C" fn uacpi_kernel_pci_device_open(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_pci_device_close(handle: uacpi_handle) {
+extern "C" fn uacpi_kernel_pci_device_close(handle: uacpi_handle) {
     let id = handle as usize;
     PCI_HANDLES.lock().remove(&id);
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_pci_read8(
+extern "C" fn uacpi_kernel_pci_read8(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: *mut uacpi_u8,
@@ -78,7 +75,7 @@ pub unsafe extern "C" fn uacpi_kernel_pci_read8(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_pci_read16(
+extern "C" fn uacpi_kernel_pci_read16(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: *mut uacpi_u16,
@@ -93,7 +90,7 @@ pub unsafe extern "C" fn uacpi_kernel_pci_read16(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_pci_read32(
+extern "C" fn uacpi_kernel_pci_read32(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: *mut uacpi_u32,
@@ -108,7 +105,7 @@ pub unsafe extern "C" fn uacpi_kernel_pci_read32(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_pci_write8(
+extern "C" fn uacpi_kernel_pci_write8(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: uacpi_u8,
@@ -123,7 +120,7 @@ pub unsafe extern "C" fn uacpi_kernel_pci_write8(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_pci_write16(
+extern "C" fn uacpi_kernel_pci_write16(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: uacpi_u16,
@@ -138,7 +135,7 @@ pub unsafe extern "C" fn uacpi_kernel_pci_write16(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn uacpi_kernel_pci_write32(
+extern "C" fn uacpi_kernel_pci_write32(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: uacpi_u32,
@@ -153,7 +150,7 @@ pub unsafe extern "C" fn uacpi_kernel_pci_write32(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_io_map(
+extern "C" fn uacpi_kernel_io_map(
     base: uacpi_io_addr,
     _: uacpi_size,
     handle: uacpi_handle,
@@ -163,10 +160,10 @@ unsafe extern "C" fn uacpi_kernel_io_map(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_io_unmap(_handle: uacpi_handle) {}
+extern "C" fn uacpi_kernel_io_unmap(_handle: uacpi_handle) {}
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_io_read8(
+extern "C" fn uacpi_kernel_io_read8(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: *mut uacpi_u8,
@@ -176,7 +173,7 @@ unsafe extern "C" fn uacpi_kernel_io_read8(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_io_read16(
+extern "C" fn uacpi_kernel_io_read16(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: *mut uacpi_u16,
@@ -186,7 +183,7 @@ unsafe extern "C" fn uacpi_kernel_io_read16(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_io_read32(
+extern "C" fn uacpi_kernel_io_read32(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: *mut uacpi_u32,
@@ -196,7 +193,7 @@ unsafe extern "C" fn uacpi_kernel_io_read32(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_io_write8(
+extern "C" fn uacpi_kernel_io_write8(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: uacpi_u8,
@@ -206,7 +203,7 @@ unsafe extern "C" fn uacpi_kernel_io_write8(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_io_write16(
+extern "C" fn uacpi_kernel_io_write16(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: uacpi_u16,
@@ -216,7 +213,7 @@ unsafe extern "C" fn uacpi_kernel_io_write16(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_io_write32(
+extern "C" fn uacpi_kernel_io_write32(
     handle: uacpi_handle,
     offset: uacpi_size,
     value: uacpi_u32,
@@ -226,17 +223,19 @@ unsafe extern "C" fn uacpi_kernel_io_write32(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_map(addr: uacpi_phys_addr, len: uacpi_size) -> *mut c_void {
+extern "C" fn uacpi_kernel_map(addr: uacpi_phys_addr, len: uacpi_size) -> *mut c_void {
     let psize = page_size::SMALL;
     let paddr = align_down(addr, psize);
     let size = align_up((addr - paddr) + len as u64, psize);
 
     for i in (0..size).step_by(psize as usize) {
         unsafe {
-            PAGEMAP
-                .get_mut()
-                .unwrap()
-                .map(paddr + i, paddr + i, flag::PRESENT | flag::WRITE, psize)
+            PAGEMAP.get_mut().unwrap().lock().map(
+                paddr + i,
+                paddr + i,
+                flag::PRESENT | flag::WRITE,
+                psize,
+            )
         };
     }
     addr as *mut c_void
@@ -244,10 +243,10 @@ unsafe extern "C" fn uacpi_kernel_map(addr: uacpi_phys_addr, len: uacpi_size) ->
 
 // no unmap yet
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_unmap(_addr: *mut c_void, _len: uacpi_size) {}
+extern "C" fn uacpi_kernel_unmap(_addr: *mut c_void, _len: uacpi_size) {}
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_alloc(size: uacpi_size) -> *mut c_void {
+extern "C" fn uacpi_kernel_alloc(size: uacpi_size) -> *mut c_void {
     unsafe {
         let layout = Layout::from_size_align(
             size + core::mem::size_of::<usize>(),
@@ -264,7 +263,7 @@ unsafe extern "C" fn uacpi_kernel_alloc(size: uacpi_size) -> *mut c_void {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_free(mem: *mut c_void) {
+extern "C" fn uacpi_kernel_free(mem: *mut c_void) {
     unsafe {
         if !mem.is_null() {
             let real_mem = (mem as *mut u8).sub(core::mem::size_of::<usize>());
@@ -280,7 +279,7 @@ unsafe extern "C" fn uacpi_kernel_free(mem: *mut c_void) {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_log(lvl: uacpi_log_level, msg: *const uacpi_char) {
+extern "C" fn uacpi_kernel_log(lvl: uacpi_log_level, msg: *const uacpi_char) {
     if !msg.is_null() {
         let message = unsafe { CStr::from_ptr(msg).to_string_lossy().replace("\n", "") };
         match lvl {
@@ -294,30 +293,30 @@ unsafe extern "C" fn uacpi_kernel_log(lvl: uacpi_log_level, msg: *const uacpi_ch
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_get_nanoseconds_since_boot() -> uacpi_u64 {
+extern "C" fn uacpi_kernel_get_nanoseconds_since_boot() -> uacpi_u64 {
     crate::arch::drivers::time::preferred_timer_ns()
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_stall(usec: uacpi_u8) {
+extern "C" fn uacpi_kernel_stall(usec: uacpi_u8) {
     let time = crate::arch::drivers::time::preferred_timer_ns();
     while crate::arch::drivers::time::preferred_timer_ns() < time + (usec as u64) * 1000 {}
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_sleep(msec: uacpi_u64) {
+extern "C" fn uacpi_kernel_sleep(msec: uacpi_u64) {
     let time = crate::arch::drivers::time::preferred_timer_ms();
     while time + msec > crate::arch::drivers::time::preferred_timer_ms() {}
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_create_mutex() -> uacpi_handle {
+extern "C" fn uacpi_kernel_create_mutex() -> uacpi_handle {
     let mutex = Box::new(Mutex::new(()));
     Box::into_raw(mutex) as *mut c_void
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_free_mutex(handle: uacpi_handle) {
+extern "C" fn uacpi_kernel_free_mutex(handle: uacpi_handle) {
     if !handle.is_null() {
         drop(unsafe { Box::from_raw(handle as *mut Mutex<()>) });
     }
@@ -348,26 +347,23 @@ impl SimpleEvent {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_create_event() -> uacpi_handle {
+extern "C" fn uacpi_kernel_create_event() -> uacpi_handle {
     let b = Box::new(SimpleEvent::default());
     Box::leak(b) as *mut SimpleEvent as uacpi_handle
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_free_event(handle: uacpi_handle) {
-    unsafe { uacpi_kernel_free(handle) };
+extern "C" fn uacpi_kernel_free_event(handle: uacpi_handle) {
+    uacpi_kernel_free(handle);
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_get_thread_id() -> uacpi_thread_id {
+extern "C" fn uacpi_kernel_get_thread_id() -> uacpi_thread_id {
     1 as *mut c_void
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_acquire_mutex(
-    handle: uacpi_handle,
-    timeout: uacpi_u16,
-) -> uacpi_status {
+extern "C" fn uacpi_kernel_acquire_mutex(handle: uacpi_handle, timeout: uacpi_u16) -> uacpi_status {
     let mutex = unsafe { &*(handle as *const Mutex<()>) };
     let mut locked = None;
 
@@ -381,7 +377,7 @@ unsafe extern "C" fn uacpi_kernel_acquire_mutex(
             while crate::arch::drivers::time::preferred_timer_ms() < time + timeout as u64 {
                 locked = mutex.try_lock();
                 if locked.is_none() {
-                    unsafe { uacpi_kernel_sleep(1) };
+                    uacpi_kernel_sleep(1);
                 }
             }
         }
@@ -396,20 +392,17 @@ unsafe extern "C" fn uacpi_kernel_acquire_mutex(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_release_mutex(handle: uacpi_handle) {
+extern "C" fn uacpi_kernel_release_mutex(handle: uacpi_handle) {
     let mutex = unsafe { &*(handle as *const Mutex<()>) };
     unsafe { mutex.force_unlock() };
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_wait_for_event(
-    handle: uacpi_handle,
-    timeout: uacpi_u16,
-) -> uacpi_bool {
+extern "C" fn uacpi_kernel_wait_for_event(handle: uacpi_handle, timeout: uacpi_u16) -> uacpi_bool {
     let event = unsafe { &mut *(handle as *mut SimpleEvent) };
     if timeout == 0xFFFF {
         while !event.decrement() {
-            unsafe { uacpi_kernel_sleep(10) };
+            uacpi_kernel_sleep(10);
         }
         true
     } else {
@@ -418,7 +411,7 @@ unsafe extern "C" fn uacpi_kernel_wait_for_event(
             if remaining <= 0 {
                 return false;
             }
-            unsafe { uacpi_kernel_sleep(10) };
+            uacpi_kernel_sleep(10);
             remaining -= 10;
         }
         true
@@ -426,19 +419,19 @@ unsafe extern "C" fn uacpi_kernel_wait_for_event(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_signal_event(handle: uacpi_handle) {
+extern "C" fn uacpi_kernel_signal_event(handle: uacpi_handle) {
     let event = unsafe { &mut *(handle as *mut SimpleEvent) };
     event.counter.fetch_add(1, Ordering::AcqRel);
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_reset_event(handle: uacpi_handle) {
+extern "C" fn uacpi_kernel_reset_event(handle: uacpi_handle) {
     let event = unsafe { &mut *(handle as *mut SimpleEvent) };
     event.counter.store(0, Ordering::Release);
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_handle_firmware_request(
+extern "C" fn uacpi_kernel_handle_firmware_request(
     _req: *mut uacpi_firmware_request,
 ) -> uacpi_status {
     UACPI_STATUS_OK
@@ -448,7 +441,7 @@ static mut UACPI_INTERRUPT_HANDLER_FN: Option<uacpi_interrupt_handler> = None;
 static mut UACPI_INTERRUPT_CTX: Option<uacpi_handle> = None;
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_install_interrupt_handler(
+extern "C" fn uacpi_kernel_install_interrupt_handler(
     irq: uacpi_u32,
     func: uacpi_interrupt_handler,
     ctx: uacpi_handle,
@@ -456,27 +449,18 @@ unsafe extern "C" fn uacpi_kernel_install_interrupt_handler(
 ) -> uacpi_status {
     unsafe {
         let vector = (irq + 0x20) as u8; // x64
-        let handler = crate::arch::interrupts::IDT[vector];
-        if !handler.handler_addr().is_null() {
-            panic!(
-                "requested uACPI interrupt vector {} is already in use",
-                vector
-            )
-        }
 
         UACPI_INTERRUPT_HANDLER_FN = Some(func);
         UACPI_INTERRUPT_CTX = Some(ctx);
 
-        IDT[vector].set_handler_fn(handle_uacpi_interrupt);
+        crate::arch::interrupts::install_interrupt(vector, handle_uacpi_interrupt);
 
         *(out_irq_handle as *mut usize) = vector as usize;
         UACPI_STATUS_OK
     }
 }
 
-extern "x86-interrupt" fn handle_uacpi_interrupt(
-    _stack_frame: x86_64::structures::idt::InterruptStackFrame,
-) {
+fn handle_uacpi_interrupt(_stack_frame: *mut crate::arch::x86_64::interrupts::StackFrame) {
     unsafe {
         if let Some(handler) = UACPI_INTERRUPT_HANDLER_FN {
             handler.unwrap()(UACPI_INTERRUPT_CTX.unwrap());
@@ -486,18 +470,14 @@ extern "x86-interrupt" fn handle_uacpi_interrupt(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_uninstall_interrupt_handler(
+extern "C" fn uacpi_kernel_uninstall_interrupt_handler(
     _func: uacpi_interrupt_handler,
     irq_handle: uacpi_handle,
 ) -> uacpi_status {
     unsafe {
         let vector = irq_handle as u8; // x64
-        let handler = crate::arch::interrupts::IDT[vector];
-        if handler.handler_addr().is_null() {
-            panic!("requested uACPI interrupt vector {} is not in use", vector)
-        }
 
-        IDT[vector].set_handler_addr(VirtAddr::zero());
+        crate::arch::interrupts::clear_interrupt(vector);
 
         UACPI_INTERRUPT_HANDLER_FN = None;
         UACPI_INTERRUPT_CTX = None;
@@ -507,13 +487,13 @@ unsafe extern "C" fn uacpi_kernel_uninstall_interrupt_handler(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_create_spinlock() -> uacpi_handle {
+extern "C" fn uacpi_kernel_create_spinlock() -> uacpi_handle {
     let lock = Box::new(SpinMutex::<()>::new(()));
     Box::into_raw(lock) as *mut c_void
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_free_spinlock(handle: uacpi_handle) {
+extern "C" fn uacpi_kernel_free_spinlock(handle: uacpi_handle) {
     if !handle.is_null() {
         let _ = unsafe { Box::from_raw(handle as *mut SpinMutex<()>) };
     }
@@ -522,9 +502,9 @@ unsafe extern "C" fn uacpi_kernel_free_spinlock(handle: uacpi_handle) {
 static mut INTS_ENABLED: bool = true;
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flags {
+extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flags {
     if !handle.is_null() {
-        let ints_enabled = crate::arch::interrupts::pic::interrupts_enabled();
+        let ints_enabled = x86_64::instructions::interrupts::are_enabled();
         if ints_enabled {
             x86_64::instructions::interrupts::disable();
         }
@@ -536,7 +516,7 @@ unsafe extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_c
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_unlock_spinlock(handle: uacpi_handle) {
+extern "C" fn uacpi_kernel_unlock_spinlock(handle: uacpi_handle) {
     if !handle.is_null() {
         let lock = unsafe { &*(handle as *const SpinMutex<()>) };
         unsafe { lock.force_unlock() };
@@ -547,7 +527,7 @@ unsafe extern "C" fn uacpi_kernel_unlock_spinlock(handle: uacpi_handle) {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_schedule_work(
+extern "C" fn uacpi_kernel_schedule_work(
     _t: uacpi_work_type,
     _handler: uacpi_work_handler,
     _ctx: uacpi_handle,
@@ -556,6 +536,6 @@ unsafe extern "C" fn uacpi_kernel_schedule_work(
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn uacpi_kernel_wait_for_work_completion() -> uacpi_status {
+extern "C" fn uacpi_kernel_wait_for_work_completion() -> uacpi_status {
     UACPI_STATUS_OK
 }

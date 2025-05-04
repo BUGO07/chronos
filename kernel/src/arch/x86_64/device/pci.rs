@@ -84,6 +84,7 @@ pub fn pci_config_write_u32(addr: PciAddress, offset: u8, value: u32) {
     }
 }
 
+//TODO: make it faster with mmio
 pub fn pci_enumerate() {
     let mut devices = Vec::new();
     for bus in 0..=255 {

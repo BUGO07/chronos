@@ -9,7 +9,7 @@ use crate::{
     NOOO, error, info,
     memory::get_usable_memory,
     print_fill, println,
-    scheduler::Scheduler,
+    scheduler::{Scheduler, Task},
     utils::{
         halt_loop,
         limine::{get_bootloader_info, get_framebuffers},
@@ -53,8 +53,10 @@ pub fn _start() -> ! {
 
     info!("usable memory - {}.{:02}GiB", gib, gdecimal);
 
-    info!("icl ts pmo ♥");
     let mut scheduler = Scheduler::new();
+    scheduler.spawn(Task::new(async {
+        info!("icl ts pmo ♥");
+    }));
     scheduler.run();
 }
 

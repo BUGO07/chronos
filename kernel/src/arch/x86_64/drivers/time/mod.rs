@@ -3,13 +3,9 @@
     Released under EUPL 1.2 License
 */
 
-use core::{
-    pin::Pin,
-    sync::atomic::{AtomicU8, Ordering},
-    task::{Context, Poll, Waker},
-};
+use core::sync::atomic::{AtomicU8, Ordering};
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::String};
 use pit::PIT_MS;
 
 pub mod hpet;
@@ -19,8 +15,6 @@ pub mod rtc;
 pub mod tsc;
 
 pub static TIMERS_INIT_STATE: AtomicU8 = AtomicU8::new(0);
-
-static mut SLEEPING_TASKS: Vec<(u64, Waker)> = Vec::new();
 
 pub fn early_init() {
     pit::init();
@@ -128,47 +122,4 @@ pub fn preferred_timer_pretty(digits: u32) -> String {
         subsecond,
         width = digits as usize
     )
-}
-
-pub struct TimerFuture {
-    wake_at: u64,
-}
-
-impl TimerFuture {
-    pub fn new(duration_ticks: u64) -> Self {
-        TimerFuture {
-            wake_at: preferred_timer_ms() + duration_ticks,
-        }
-    }
-}
-
-impl Future for TimerFuture {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if preferred_timer_ms() >= self.wake_at {
-            Poll::Ready(())
-        } else {
-            register_sleep(self.wake_at, cx.waker().clone());
-            Poll::Pending
-        }
-    }
-}
-
-pub fn register_sleep(wake_at: u64, waker: Waker) {
-    unsafe { SLEEPING_TASKS.push((wake_at, waker)) };
-}
-
-pub fn wake_ready_tasks() {
-    let now = preferred_timer_ms();
-    let tasks = unsafe { &mut SLEEPING_TASKS };
-    let mut i = 0;
-    while i < tasks.len() {
-        if tasks[i].0 <= now {
-            let (_, waker) = tasks.remove(i);
-            waker.wake();
-        } else {
-            i += 1;
-        }
-    }
 }

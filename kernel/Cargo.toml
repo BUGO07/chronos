@@ -8,11 +8,11 @@ edition = "2024"
 opt-level = 1
 lto = "thin" # makes performance 10x with no noticable difference in compile time
 
-[profile.release]
-opt-level = 3 # wtf no bootloop on x86_64 either makes 0 sense but i'll accept it
-codegen-units = 1
+[profile.release] # x86_64 release profile
+opt-level = 1 # 2 and 3 make scheduler not work properly
+# codegen-units = 1 # ts now bootloops
 strip = true
-lto = "fat"
+lto = "thin" # fat lto bootloopsp too
 
 [profile.smol]
 inherits = "release"
@@ -21,9 +21,9 @@ codegen-units = 1
 strip = true
 lto = "fat"
 
-[profile.armrel]
+[profile.armrel] # aarch64 release profile
 inherits = "release"
-opt-level = 3 # no bootloop on aarch64
+opt-level = 3
 codegen-units = 1
 strip = true
 lto = "fat"

@@ -95,7 +95,7 @@ pub fn init() {
 
     info!("mapping hpet address: 0x{:X} -> 0x{:X}", paddr, address);
     unsafe {
-        crate::memory::vmm::PAGEMAP.get_mut().unwrap().map(
+        crate::memory::vmm::PAGEMAP.get_mut().unwrap().lock().map(
             paddr + get_hhdm_offset(),
             paddr,
             flag::PRESENT | flag::WRITE,

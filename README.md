@@ -8,9 +8,10 @@ Contributors are welcome.
 
 ## [LICENSE](LICENSE)
 
-## Features (most of these are x86_64 only)
+## Features
 
-- Basic Logger
+### x86_64
+- Terminal Emulator
 - Serial
 - Interrupts
 - PIT + TSC + KVM + HPET + LAPIC
@@ -18,14 +19,22 @@ Contributors are welcome.
 - Memory Management
 - PS/2 Keyboard
 - PS/2 Mouse
-- Cooperative Scheduler
+- Preemptive Scheduler (single core for now)
 - ACPI
-- PCI
-- Basic Shell (i know its not supposed to be there, its temporary)
+- Basic PCI
+- Basic Shell
+
+### aarch64 (arm64)
+
+- Terminal Emulator
+- Serial
+- Generic Timer
+- Memory Management (no pagemap yet)
+- Cooperative Scheduler
 
 ## TODO:
 
-- Preemptive Scheduler
+- Preemptive Scheduler (aarch64)
 - VFS
 - USB
 - Userspace

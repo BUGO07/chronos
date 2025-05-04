@@ -22,12 +22,7 @@ pub fn early_init() {
     TIMERS_INIT_STATE.store(1, Ordering::Relaxed);
 }
 
-pub fn init() {
-    // hpet::init();
-    // TIMERS_INIT_STATE.store(4, Ordering::Relaxed);
-    // crate::arch::system::lapic::init();
-    // TIMERS_INIT_STATE.store(5, Ordering::Relaxed);
-}
+pub fn init() {} // :/
 
 pub fn preferred_timer_ms() -> u64 {
     preferred_timer_ns() / 1_000_000
@@ -65,19 +60,10 @@ pub trait KernelTimer {
 }
 
 pub fn preferred_timer_ns() -> u64 {
-    // let state = TIMERS_INIT_STATE.load(Ordering::Relaxed);
-
     unsafe {
         let generic = crate::arch::drivers::time::generic::GENERIC_TIMER
             .get()
             .map(|t| t as &dyn KernelTimer);
-        // let tsc = crate::arch::drivers::time::tsc::TSC_TIMER
-        //     .get()
-        //     .map(|t| t as &dyn KernelTimer);
-        // let hpet = crate::arch::drivers::time::hpet::HPET_TIMER
-        //     .get()
-        //     .map(|t| t as &dyn KernelTimer);
-
         let timers: [&Option<&dyn KernelTimer>; 1] = [&generic];
 
         for timer_opt in timers {

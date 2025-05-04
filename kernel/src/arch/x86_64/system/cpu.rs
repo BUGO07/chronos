@@ -12,7 +12,7 @@ use core::{
 use crossbeam_queue::ArrayQueue;
 use limine::mp::Cpu;
 
-use crate::{info, scheduler::Scheduler, utils::limine::get_mp_response};
+use crate::{info, scheduler::cooperative, utils::limine::get_mp_response};
 
 static mut CPU_COUNT: usize = 0;
 static mut PROCESSORS: OnceCell<ArrayQueue<&Cpu>> = OnceCell::new();
@@ -58,10 +58,13 @@ pub fn init() {
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn cpu_entry(_cpu: &limine::mp::Cpu) -> ! {
-    // todo
-    let mut scheduler = Scheduler::new();
+extern "C" fn cpu_entry(cpu: &limine::mp::Cpu) -> ! {
+    //TODO: fix this
+    let mut scheduler = cooperative::Scheduler::new();
+    let id = cpu.id;
+    scheduler.spawn(crate::scheduler::task::Task::new(async move {
+        info!("cpu {} initialized", id);
+    }));
     scheduler.run()
 }
 

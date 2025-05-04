@@ -5,9 +5,9 @@
 
 use ps2_mouse::{Mouse, MouseState};
 use spin::Mutex;
-use x86_64::{instructions::port::PortReadOnly, structures::idt::InterruptStackFrame};
+use x86_64::instructions::port::PortReadOnly;
 
-use crate::{arch::interrupts::IDT, error, info};
+use crate::{error, info};
 
 lazy_static::lazy_static! {
     pub static ref DRIVER: Mutex<Mouse> = Mutex::new(Mouse::new());
@@ -43,7 +43,7 @@ impl MouseInfo {
 pub fn init() {
     x86_64::instructions::interrupts::without_interrupts(|| {
         info!("initializing ps/2 mouse...");
-        unsafe { IDT[0x2c].set_handler_fn(mouse_interrupt_handler) };
+        crate::arch::interrupts::install_interrupt(0x2c, mouse_interrupt_handler);
         if let Err(err) = DRIVER.lock().init() {
             error!("failed to initialize ps/2 mouse: {}", err);
         }
@@ -91,7 +91,7 @@ fn on_complete(mouse_state: MouseState) {
     mouse.state = mouse_state;
 }
 
-pub extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+pub fn mouse_interrupt_handler(_stack_frame: *mut crate::arch::x86_64::interrupts::StackFrame) {
     let mut port = PortReadOnly::new(0x60);
     let packet = unsafe { port.read() };
     DRIVER.lock().process_packet(packet);

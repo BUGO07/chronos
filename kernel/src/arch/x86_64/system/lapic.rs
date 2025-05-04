@@ -1,12 +1,10 @@
-/*
-    Copyright (C) 2025 bugo07
-    Released under EUPL 1.2 License
-*/
+use core::sync::atomic::fence;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use mmio::{Allow, VolBox};
 
 use crate::{
-    arch::{drivers::time::pit::current_pit_ticks, interrupts::IDT},
+    arch::drivers::time::pit::current_pit_ticks,
     debug, info,
     memory::vmm::{flag, page_size},
     utils::limine::get_hhdm_offset,
@@ -23,19 +21,19 @@ mod reg {
     pub const TDC: u32 = 0x3E0;
     pub const TIC: u32 = 0x380;
     pub const TCC: u32 = 0x390;
-
     pub const DEADLINE: u32 = 0x6E0;
+    pub const EOI: u32 = 0xB0;
 }
 
-pub static mut MMIO: u64 = 0;
-pub static mut LAPIC_FREQUENCY: u64 = 0;
+static MMIO: AtomicU64 = AtomicU64::new(0);
+static LAPIC_FREQUENCY: AtomicU64 = AtomicU64::new(0);
 
 pub fn init() {
     info!("setting up...");
     let mut val = super::cpu::read_msr(reg::APIC_BASE);
     let phys_mmio = val & 0xFFFFF000;
     let mmio = phys_mmio + get_hhdm_offset();
-    unsafe { MMIO = mmio };
+    MMIO.store(mmio, Ordering::SeqCst);
 
     val |= 1 << 11;
     super::cpu::write_msr(reg::APIC_BASE, val);
@@ -44,40 +42,45 @@ pub fn init() {
 
     let psize = page_size::SMALL;
 
-    if !unsafe {
-        crate::memory::vmm::PAGEMAP.get_mut().unwrap().map(
+    let success = unsafe {
+        crate::memory::vmm::PAGEMAP.get().unwrap().lock().map(
             mmio,
             phys_mmio,
             flag::PRESENT | flag::WRITE,
             psize,
         )
-    } {
+    };
+
+    if !success {
         panic!("could not map lapic mmio");
     }
 
-    unsafe { IDT[0xFF].set_handler_fn(lapic_oneshot_timer_handler) };
+    fence(Ordering::SeqCst);
+
+    crate::arch::interrupts::install_interrupt(0xff, lapic_oneshot_timer_handler);
 
     mmio_write(reg::TPR, 0x00);
     mmio_write(reg::SIV, (1 << 8) | 0xFF);
 
     debug!("calibrating...");
     calibrate_timer();
-    arm(250_000_000, 0xFF);
-
     info!("done");
 }
 
-extern "x86-interrupt" fn lapic_oneshot_timer_handler(
-    _stack_frame: x86_64::structures::idt::InterruptStackFrame,
-) {
+fn lapic_oneshot_timer_handler(stack_frame: *mut crate::arch::x86_64::interrupts::StackFrame) {
+    crate::scheduler::schedule(stack_frame);
+
+    mmio_write(reg::EOI, 0);
 }
 
 pub fn arm(ns: usize, vector: u8) {
-    mmio_write(reg::TIC, 0);
-    mmio_write(reg::LVT, vector as u32);
-    mmio_write(reg::TIC, unsafe {
-        (ns as u128 * LAPIC_FREQUENCY as u128 / 1_000_000_000) as u32
-    });
+    let freq = LAPIC_FREQUENCY.load(Ordering::SeqCst);
+
+    let lvt_value = (vector as u32) & !(0b11 << 17);
+    mmio_write(reg::LVT, lvt_value);
+
+    let ticks = ((ns as u128 * freq as u128) / 1_000_000_000) as u32;
+    mmio_write(reg::TIC, ticks);
 }
 
 fn calibrate_timer() {
@@ -85,37 +88,37 @@ fn calibrate_timer() {
 
     let millis = 10;
     let times = 3;
-    let mut freq: u64 = 0;
+    let mut freq_total: u64 = 0;
 
     for _ in 0..times {
         mmio_write(reg::TIC, 0xFFFFFFFF);
         let target = current_pit_ticks() + millis;
-        loop {
-            if current_pit_ticks() >= target {
-                break;
-            }
-        }
+        while current_pit_ticks() < target {}
         let count = mmio_read(reg::TCC);
         mmio_write(reg::TIC, 0);
 
-        freq += (0xFFFFFFFF - count as u64) * 100;
+        let elapsed = 0xFFFFFFFFu64 - count as u64;
+        freq_total += elapsed * 100;
     }
-    unsafe {
-        LAPIC_FREQUENCY = freq / times;
-        debug!(
-            "lapic frequency - {}.{:03}MHz",
-            LAPIC_FREQUENCY / 1_000_000,
-            (LAPIC_FREQUENCY % 1_000_000) / 1_000,
-        );
-    };
+
+    let avg = freq_total / times;
+    LAPIC_FREQUENCY.store(avg, Ordering::SeqCst);
+
+    debug!(
+        "lapic frequency - {}.{:03}MHz",
+        avg / 1_000_000,
+        (avg % 1_000_000) / 1_000,
+    );
 }
 
 fn mmio_write(reg: u32, val: u32) {
+    let addr = MMIO.load(Ordering::Relaxed) + reg as u64;
     unsafe {
-        VolBox::<u32, Allow, Allow>::new((MMIO + reg as u64) as *mut u32).write(val);
+        VolBox::<u32, Allow, Allow>::new(addr as *mut u32).write(val);
     }
 }
 
 fn mmio_read(reg: u32) -> u32 {
-    unsafe { VolBox::<u32, Allow, Allow>::new((MMIO + reg as u64) as *mut u32).read() }
+    let addr = MMIO.load(Ordering::Relaxed) + reg as u64;
+    unsafe { VolBox::<u32, Allow, Allow>::new(addr as *mut u32).read() }
 }
