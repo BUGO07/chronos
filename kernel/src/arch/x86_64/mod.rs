@@ -3,17 +3,18 @@
     Released under EUPL 1.2 License
 */
 
-use alloc::{string::ToString, vec::Vec};
+use alloc::{string::ToString, sync::Arc, vec::Vec};
 use core::{
     panic::PanicInfo,
     sync::atomic::{AtomicU64, Ordering},
 };
+use drivers::keyboard::keyboard_thread;
+use shell::shell_thread;
 
 use crate::{
     NOOO, debug, info,
     memory::get_usable_memory,
-    print, print_fill, println,
-    scheduler::{Scheduler, task::Task},
+    print, print_fill, println, scheduler,
     utils::{
         halt_loop,
         limine::{get_bootloader_info, get_framebuffers},
@@ -36,31 +37,8 @@ struct StackFrame {
     rip: usize,
 }
 
-pub fn _start() -> ! {
-    println!("\n{NOOO}\n");
-    info!("x86_64 kernel starting...\n");
-
-    crate::memory::init();
-    crate::arch::system::cpu::init_bsp();
-    crate::arch::gdt::init();
-    crate::arch::interrupts::init_idt();
-    crate::arch::interrupts::pic::init();
-    crate::arch::interrupts::pic::unmask_all(); // limine masks all IRQs by default // todo: fix ts
-
-    debug!("enabling interrupts (sti)");
-    x86_64::instructions::interrupts::enable();
-
-    crate::arch::drivers::time::early_init();
-
-    crate::arch::drivers::acpi::init();
-
-    #[cfg(feature = "uacpi_test")]
-    crate::arch::drivers::acpi::shutdown();
-
-    crate::arch::drivers::time::init();
-    crate::arch::system::cpu::init();
+pub fn main_thread() -> ! {
     crate::arch::device::pci::pci_enumerate();
-
     crate::arch::drivers::mouse::init();
 
     println!();
@@ -95,13 +73,6 @@ pub fn _start() -> ! {
         rtc_time.timezone_pretty()
     );
 
-    #[cfg(feature = "tests")]
-    crate::tests::init();
-
-    // crate::arch::shell::run_command("clear", Vec::new());
-
-    // info!("cpu freq - {}", crate::arch::system::cpuid::get_freq());
-
     info!("rocking a {}", crate::arch::system::cpuid::get_cpu());
     let cpu_freq = CPU_FREQ.load(Ordering::Relaxed);
     info!(
@@ -125,24 +96,52 @@ pub fn _start() -> ! {
 
     info!("icl ts pmo ♥");
 
-    let mut scheduler = Scheduler::new();
-    scheduler.spawn(Task::new(
-        crate::arch::drivers::keyboard::handle_keypresses(),
-    ));
-    scheduler.spawn(Task::new(crate::arch::shell::shell_task()));
-    // scheduler.spawn(Task::new(async {
-    //     let cpu_freq = measure_cpu_frequency_async().await;
-    //     if cpu_freq == 0 {
-    //         panic!("failed to measure cpu frequency");
-    //     }
-    //     info!(
-    //         "cpu frequency - {}.{:03}GHz",
-    //         cpu_freq / 1_000_000_000,
-    //         (cpu_freq % 1_000_000_000) / 1_000_000,
-    //     );
-    // }));
-    scheduler.run()
-    // loop {}
+    scheduler::new_thread(
+        unsafe { Arc::clone(scheduler::PID0.get().unwrap()) },
+        keyboard_thread as usize,
+    );
+
+    scheduler::new_thread(
+        unsafe { Arc::clone(scheduler::PID0.get().unwrap()) },
+        shell_thread as usize,
+    );
+
+    halt_loop()
+}
+
+pub fn _start() -> ! {
+    println!("\n{NOOO}\n");
+    info!("x86_64 kernel starting...\n");
+
+    crate::memory::init();
+    crate::arch::system::cpu::init_bsp();
+    crate::arch::gdt::init();
+    crate::arch::interrupts::init_idt();
+    crate::arch::interrupts::pic::init();
+    crate::arch::interrupts::pic::unmask_all(); // limine masks all IRQs by default // todo: fix ts
+
+    debug!("enabling interrupts (sti)");
+    x86_64::instructions::interrupts::enable();
+
+    crate::arch::drivers::time::early_init();
+
+    crate::arch::drivers::acpi::init();
+
+    #[cfg(feature = "uacpi_test")]
+    crate::arch::drivers::acpi::shutdown();
+
+    crate::arch::drivers::time::init();
+    crate::arch::system::cpu::init();
+
+    #[cfg(feature = "tests")]
+    crate::tests::init();
+
+    scheduler::init_pid0();
+    scheduler::new_thread(
+        unsafe { Arc::clone(scheduler::PID0.get().unwrap()) },
+        main_thread as usize,
+    );
+    scheduler::init();
 }
 
 pub fn _panic(info: &PanicInfo) -> ! {

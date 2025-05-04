@@ -6,7 +6,9 @@
 use core::{alloc::Layout, cell::OnceCell};
 
 use crate::utils::{align_down, align_up};
+use alloc::sync::Arc;
 use limine::memory_map::EntryType;
+use spin::Mutex;
 
 use crate::{
     debug, info,
@@ -29,7 +31,7 @@ pub mod flag {
     pub const NO_EXEC: u64 = 1 << 63;
 }
 
-pub static mut PAGEMAP: OnceCell<Pagemap> = OnceCell::new();
+pub static mut PAGEMAP: OnceCell<Arc<Mutex<Pagemap>>> = OnceCell::new();
 
 unsafe impl Send for Pagemap {}
 
@@ -43,6 +45,8 @@ pub struct Table {
 pub struct Pagemap {
     pub top_level: *mut Table,
 }
+
+unsafe impl Sync for Pagemap {}
 
 impl Default for Pagemap {
     fn default() -> Self {
@@ -156,7 +160,7 @@ pub fn init() {
             continue;
         }
 
-        // ! hard setting this to LARGE stop my laptop from crashing
+        // ! hard setting this to LARGE stops my laptop from crashing
         let psize = if entry.length >= page_size::LARGE {
             page_size::LARGE
         } else if entry.length >= page_size::MEDIUM {
@@ -203,6 +207,6 @@ pub fn init() {
     {
         // TODO:
     }
-    unsafe { PAGEMAP.set(pmap).ok() };
+    unsafe { PAGEMAP.set(Arc::new(Mutex::new(pmap))).ok() };
     info!("done");
 }

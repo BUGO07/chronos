@@ -11,7 +11,12 @@
     clippy::new_ret_no_self,
     clippy::missing_safety_doc,
     clippy::single_match,
-    clippy::manual_dangling_ptr
+    clippy::manual_dangling_ptr,
+    clippy::empty_loop
+)]
+#![cfg_attr(
+    feature = "tests",
+    allow(unused_imports, unused_variables, dead_code, unused_mut)
 )]
 
 extern crate alloc;
@@ -21,7 +26,6 @@ use core::panic::PanicInfo;
 pub const NOOO: &str = include_str!("../res/nooo.txt");
 
 pub mod arch;
-
 pub mod memory;
 pub mod scheduler;
 pub mod utils;
@@ -30,7 +34,7 @@ pub mod utils;
 pub mod tests;
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn kmain() -> ! {
+extern "C" fn kmain() -> ! {
     arch::_start()
 }
 

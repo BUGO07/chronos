@@ -63,7 +63,7 @@ impl KernelTimer for GenericTimer {
     }
 
     fn priority(&self) -> u8 {
-        20
+        0
     }
 }
 

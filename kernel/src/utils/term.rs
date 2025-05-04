@@ -23,17 +23,17 @@ lazy_static::lazy_static! {
 }
 
 pub struct Writer {
-    pub ctx: *mut flanterm_sys::flanterm_context,
+    ctx: *mut flanterm_sys::flanterm_context,
 }
 
 unsafe impl Send for Writer {}
 unsafe impl Sync for Writer {}
 
-unsafe extern "C" fn malloc(size: usize) -> *mut core::ffi::c_void {
+extern "C" fn malloc(size: usize) -> *mut core::ffi::c_void {
     unsafe { alloc::alloc::alloc(Layout::from_size_align(size, 0x10).unwrap()) as *mut c_void }
 }
 
-unsafe extern "C" fn free(ptr: *mut core::ffi::c_void, size: usize) {
+extern "C" fn free(ptr: *mut core::ffi::c_void, size: usize) {
     unsafe { alloc::alloc::dealloc(ptr as *mut u8, Layout::from_size_align(size, 0x10).unwrap()) };
 }
 
@@ -76,7 +76,7 @@ const MARGIN: usize = 10;
 // }
 
 impl Writer {
-    pub fn new() -> Vec<Writer> {
+    fn new() -> Vec<Writer> {
         let mut flanterm_contexts = Vec::new();
         #[cfg(not(feature = "uacpi_test"))]
         {
@@ -118,7 +118,7 @@ impl Writer {
         flanterm_contexts
     }
 
-    pub fn write(&mut self, s: &str) {
+    fn write(&mut self, s: &str) {
         let buf;
         #[cfg(target_arch = "x86_64")]
         {

@@ -10,8 +10,6 @@ use x86_64::instructions::port::Port;
 
 use crate::info;
 
-use super::wake_ready_tasks;
-
 pub const PIT_FREQUENCY: u32 = 1193182;
 
 pub fn init() {
@@ -25,9 +23,7 @@ pub fn init() {
     info!("done");
 }
 
-pub extern "x86-interrupt" fn timer_interrupt_handler(
-    _stack_frame: x86_64::structures::idt::InterruptStackFrame,
-) {
+pub fn timer_interrupt_handler(_stack_frame: *mut crate::arch::x86_64::interrupts::StackFrame) {
     pit_tick();
     crate::arch::interrupts::pic::send_eoi(0);
 }
@@ -60,7 +56,6 @@ pub static PIT_MS: AtomicU64 = AtomicU64::new(0);
 
 pub fn pit_tick() {
     PIT_MS.fetch_add(1, Ordering::Relaxed);
-    wake_ready_tasks();
 }
 
 pub fn current_pit_ticks() -> u64 {

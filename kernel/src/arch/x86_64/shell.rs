@@ -14,10 +14,10 @@ use pc_keyboard::{DecodedKey, KeyCode};
 use crate::{
     arch::drivers::time::{self, KernelTimer},
     print, print_fill, println,
-    utils::logger::color,
+    utils::{halt_loop, logger::color},
 };
 
-use super::drivers::{keyboard::ScancodeStream, time::TimerFuture};
+use super::drivers::keyboard::KeyboardState;
 
 pub static mut SHELL: OnceCell<Shell> = OnceCell::new();
 
@@ -29,22 +29,23 @@ lazy_static::lazy_static! {
         .collect();
 }
 
-pub async fn shell_task() {
+pub fn shell_thread() -> ! {
     unsafe { SHELL.set(Shell::new()).ok() };
     print!("$ ");
+    halt_loop()
+    //TODO: implement thread sleep to make cursor blink work
+    // let mut visible = true;
 
-    let mut visible = true;
-
-    loop {
-        if visible {
-            print!("\x1b[?25l");
-        } else {
-            print!("\x1b[?25h");
-        }
-        visible = !visible;
-
-        TimerFuture::new(700).await
-    }
+    // loop {
+    //     if preferred_timer_ms() % 700 == 0 {
+    //         if visible {
+    //             print!("\x1b[?25l");
+    //         } else {
+    //             print!("\x1b[?25h");
+    //         }
+    //         visible = !visible;
+    //     }
+    // }
 }
 
 pub struct Shell {
@@ -72,9 +73,9 @@ impl Shell {
         }
     }
 
-    pub fn key_event(&mut self, dc: DecodedKey, scancodes: &ScancodeStream) {
+    pub fn key_event(&mut self, dc: DecodedKey, keyboard_state: &KeyboardState) {
         print!("\x1b[?25h");
-        match scancodes.keys_down.as_slice() {
+        match keyboard_state.keys_down.as_slice() {
             [KeyCode::LControl, KeyCode::C] => {
                 print!("^C\n$ ");
                 self.input.clear();
