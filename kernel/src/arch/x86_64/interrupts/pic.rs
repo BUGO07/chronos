@@ -3,21 +3,25 @@
     Released under EUPL 1.2 License
 */
 
-use x86_64::instructions::port::Port;
+use crate::{
+    debug, info,
+    utils::asm::port::{inb, outb},
+};
 
-use crate::{debug, info};
-
+const PIC_EOI: u8 = 0x20;
 const ICW1_ICW4: u8 = 0x01;
 const ICW4_8086: u8 = 0x01;
 const ICW1_INIT: u8 = 0x10;
+const PIC1_COMMAND: u16 = 0x20;
+const PIC2_COMMAND: u16 = 0xA0;
+const PIC1_DATA: u16 = 0x21;
+const PIC2_DATA: u16 = 0xA1;
 
 pub fn send_eoi(irq: u8) {
-    unsafe {
-        if irq >= 8 {
-            Port::new(0xA0).write(0x20u8);
-        }
-        Port::new(0x20).write(0x20u8);
+    if irq >= 8 {
+        outb(PIC2_COMMAND, PIC_EOI);
     }
+    outb(PIC1_COMMAND, PIC_EOI);
 }
 
 pub fn interrupts_enabled() -> bool {
@@ -30,47 +34,36 @@ pub fn interrupts_enabled() -> bool {
 
 pub fn unmask_all() {
     debug!("unmasking all irqs...");
-    unsafe {
-        Port::new(0x21).write(0u8);
-        Port::new(0xA1).write(0u8);
-    }
+    outb(PIC1_DATA, 0);
+    outb(PIC2_DATA, 0);
     info!("done");
 }
 
 pub fn mask_all() {
     debug!("masking all irqs...");
-    unsafe {
-        Port::new(0x21).write(0xffu8);
-        Port::new(0xA1).write(0xffu8);
-    }
+    outb(PIC1_DATA, 0xff);
+    outb(PIC2_DATA, 0xff);
     info!("done");
 }
 
 pub fn init() {
     info!("remapping...");
 
-    let mut master_command: Port<u8> = Port::new(0x20);
-    let mut master_data: Port<u8> = Port::new(0x21);
-    let mut slave_command: Port<u8> = Port::new(0xA0);
-    let mut slave_data: Port<u8> = Port::new(0xA1);
+    let i1 = inb(PIC1_DATA);
+    let i2 = inb(PIC2_DATA);
 
-    unsafe {
-        let i1 = master_data.read();
-        let i2 = slave_data.read();
+    outb(PIC1_COMMAND, ICW1_INIT | ICW1_ICW4);
+    outb(PIC2_COMMAND, ICW1_INIT | ICW1_ICW4);
 
-        master_command.write(ICW1_INIT | ICW1_ICW4);
-        slave_command.write(ICW1_INIT | ICW1_ICW4);
+    outb(PIC1_DATA, 0x20);
+    outb(PIC2_DATA, 0x28);
 
-        master_data.write(0x20);
-        slave_data.write(0x28);
+    outb(PIC1_DATA, 0x04);
+    outb(PIC2_DATA, 0x02);
 
-        master_data.write(0x04);
-        slave_data.write(0x02);
+    outb(PIC1_DATA, ICW4_8086);
+    outb(PIC2_DATA, ICW4_8086);
 
-        master_data.write(ICW4_8086);
-        slave_data.write(ICW4_8086);
-
-        master_data.write(i1);
-        slave_data.write(i2);
-    }
+    outb(PIC1_DATA, i1);
+    outb(PIC2_DATA, i2);
 }

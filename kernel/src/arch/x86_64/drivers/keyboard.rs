@@ -5,7 +5,8 @@
 
 use alloc::{collections::linked_list::LinkedList, vec::Vec};
 use pc_keyboard::{HandleControl, KeyCode, Keyboard, ScancodeSet1, layouts::Us104Key};
-use x86_64::instructions::port::Port;
+
+use crate::{arch::interrupts::StackFrame, utils::asm::port::inb};
 
 static mut KEYBOARD_STATE: KeyboardState = KeyboardState {
     scancodes: LinkedList::new(),
@@ -16,12 +17,8 @@ pub struct KeyboardState {
     pub keys_down: Vec<KeyCode>,
 }
 
-pub fn keyboard_interrupt_handler(_stack_frame: *mut crate::arch::x86_64::interrupts::StackFrame) {
-    unsafe {
-        KEYBOARD_STATE
-            .scancodes
-            .push_back(Port::<u8>::new(0x60).read())
-    };
+pub fn keyboard_interrupt_handler(_stack_frame: *mut StackFrame) {
+    unsafe { KEYBOARD_STATE.scancodes.push_back(inb(0x60)) };
     crate::arch::interrupts::pic::send_eoi(1);
 }
 

@@ -12,11 +12,11 @@ use drivers::keyboard::keyboard_thread;
 use shell::shell_thread;
 
 use crate::{
-    NOOO, debug, info,
+    NOOO, info,
     memory::get_usable_memory,
     print, print_fill, println, scheduler,
     utils::{
-        halt_loop,
+        asm::halt_loop,
         limine::{get_bootloader_info, get_framebuffers},
     },
 };
@@ -32,8 +32,8 @@ pub static CPU_FREQ: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(debug_assertions)]
 #[repr(C)]
-struct StackFrame {
-    rbp: *const StackFrame,
+struct StackTrace {
+    rbp: *const StackTrace,
     rip: usize,
 }
 
@@ -64,7 +64,12 @@ pub fn main_thread() -> ! {
     // let config = crate::utils::config::get_config();
 
     let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
-        .with_timezone_offset(crate::utils::config::ZONE_OFFSET) // change me
+        .with_timezone_offset(
+            crate::utils::config::get_config()
+                .timezone_offset
+                .to_int()
+                .clamp(-720, 840) as i16,
+        ) // change me
         .adjusted_for_timezone();
 
     info!(
@@ -120,8 +125,7 @@ pub fn _start() -> ! {
     crate::arch::interrupts::pic::init();
     crate::arch::interrupts::pic::unmask_all(); // limine masks all IRQs by default // todo: fix ts
 
-    debug!("enabling interrupts (sti)");
-    x86_64::instructions::interrupts::enable();
+    crate::utils::asm::toggle_ints(true);
 
     crate::arch::drivers::time::early_init();
 
@@ -153,7 +157,7 @@ pub fn _panic(info: &PanicInfo) -> ! {
     }
     #[cfg(not(feature = "tests"))]
     {
-        println!("\n{}{NOOO}\n", crate::utils::logger::color::RED);
+        println!("{}\n{NOOO}\n", crate::utils::logger::color::RED);
         print_fill!("~", "Kernel Panic");
         println!("~");
         // unnecessary but might change in the future
@@ -176,7 +180,7 @@ pub fn _panic(info: &PanicInfo) -> ! {
         }
         #[cfg(debug_assertions)]
         {
-            let mut rbp: *const StackFrame;
+            let mut rbp: *const StackTrace;
             unsafe {
                 core::arch::asm!("mov {}, rbp", out(reg) rbp);
             }
@@ -191,7 +195,7 @@ pub fn _panic(info: &PanicInfo) -> ! {
                 }
             }
         }
-        println!("~\tstopping code execution and dumping registers\n~\t");
+        println!("~\n~\tstopping code execution and dumping registers\n~\t");
         let registers = crate::arch::system::cpu::read_registers();
         println!(
             "~\tr15:    0x{0:016X}  -  rsi:    0x{10:016X}\n\
@@ -230,7 +234,7 @@ pub fn _panic(info: &PanicInfo) -> ! {
         );
         print_fill!("~");
         print!("{}", crate::utils::logger::color::RESET);
-        x86_64::instructions::interrupts::disable();
+        crate::utils::asm::toggle_ints(false);
     }
     halt_loop()
 }

@@ -1,14 +1,18 @@
-use core::sync::atomic::fence;
-use core::sync::atomic::{AtomicU64, Ordering};
-
-use mmio::{Allow, VolBox};
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
 
 use crate::{
-    arch::drivers::time::pit::current_pit_ticks,
+    arch::{drivers::time::pit::current_pit_ticks, interrupts::StackFrame},
     debug, info,
     memory::vmm::{flag, page_size},
-    utils::limine::get_hhdm_offset,
+    utils::{
+        asm::regs::{rdmsr, wrmsr},
+        limine::get_hhdm_offset,
+    },
 };
+use core::sync::atomic::{AtomicU64, Ordering, fence};
 
 #[allow(dead_code)]
 mod reg {
@@ -30,20 +34,20 @@ static LAPIC_FREQUENCY: AtomicU64 = AtomicU64::new(0);
 
 pub fn init() {
     info!("setting up...");
-    let mut val = super::cpu::read_msr(reg::APIC_BASE);
+    let mut val = rdmsr(reg::APIC_BASE);
     let phys_mmio = val & 0xFFFFF000;
     let mmio = phys_mmio + get_hhdm_offset();
     MMIO.store(mmio, Ordering::SeqCst);
 
     val |= 1 << 11;
-    super::cpu::write_msr(reg::APIC_BASE, val);
+    wrmsr(reg::APIC_BASE, val);
 
     debug!("mapping mmio: 0x{:X} -> 0x{:X}", phys_mmio, mmio);
 
     let psize = page_size::SMALL;
 
     let success = unsafe {
-        crate::memory::vmm::PAGEMAP.get().unwrap().lock().map(
+        crate::memory::vmm::PAGEMAP.get_mut().unwrap().lock().map(
             mmio,
             phys_mmio,
             flag::PRESENT | flag::WRITE,
@@ -67,7 +71,7 @@ pub fn init() {
     info!("done");
 }
 
-fn lapic_oneshot_timer_handler(stack_frame: *mut crate::arch::x86_64::interrupts::StackFrame) {
+fn lapic_oneshot_timer_handler(stack_frame: *mut StackFrame) {
     crate::scheduler::schedule(stack_frame);
 
     mmio_write(reg::EOI, 0);
@@ -111,14 +115,14 @@ fn calibrate_timer() {
     );
 }
 
+#[inline(always)]
 fn mmio_write(reg: u32, val: u32) {
     let addr = MMIO.load(Ordering::Relaxed) + reg as u64;
-    unsafe {
-        VolBox::<u32, Allow, Allow>::new(addr as *mut u32).write(val);
-    }
+    crate::utils::asm::mmio::write(addr, val as u64, core::mem::size_of::<u32>());
 }
 
+#[inline(always)]
 fn mmio_read(reg: u32) -> u32 {
     let addr = MMIO.load(Ordering::Relaxed) + reg as u64;
-    unsafe { VolBox::<u32, Allow, Allow>::new(addr as *mut u32).read() }
+    crate::utils::asm::mmio::read(addr, core::mem::size_of::<u32>()) as u32
 }

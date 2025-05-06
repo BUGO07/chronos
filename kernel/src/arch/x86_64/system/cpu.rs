@@ -3,28 +3,23 @@
     Released under EUPL 1.2 License
 */
 
-use core::{
-    arch::{asm, x86_64::__cpuid},
-    cell::OnceCell,
-    ffi::c_void,
-};
+use core::{arch::asm, ffi::c_void};
 
-use crossbeam_queue::ArrayQueue;
+use alloc::vec::Vec;
 use limine::mp::Cpu;
 
-use crate::{info, scheduler::cooperative, utils::limine::get_mp_response};
+use crate::{
+    info,
+    scheduler::cooperative,
+    utils::{asm::_cpuid, limine::get_mp_response},
+};
 
-static mut CPU_COUNT: usize = 0;
-static mut PROCESSORS: OnceCell<ArrayQueue<&Cpu>> = OnceCell::new();
+static mut PROCESSORS: Vec<&Cpu> = Vec::new();
 
 pub fn init_bsp() {
     let mp = get_mp_response();
     let bsp_id = mp.bsp_lapic_id();
     let cpus = mp.cpus_mut();
-    let cpu_count = cpus.len();
-    unsafe { CPU_COUNT = cpu_count };
-
-    unsafe { PROCESSORS.set(ArrayQueue::new(cpu_count)).unwrap() };
 
     for cpu in cpus {
         if bsp_id != cpu.lapic_id {
@@ -33,15 +28,13 @@ pub fn init_bsp() {
 
         info!("initializing bsp {}: lapic id: {}", cpu.id, cpu.lapic_id);
 
-        unsafe { PROCESSORS.get().unwrap().push(cpu).ok() };
+        unsafe { PROCESSORS.push(cpu) };
     }
 }
 
 pub fn init() {
     let mp = get_mp_response();
     let bsp_id = mp.bsp_lapic_id();
-
-    let processors = unsafe { PROCESSORS.get().unwrap() };
 
     let mut idx = 0;
     for cpu in mp.cpus_mut() {
@@ -53,18 +46,14 @@ pub fn init() {
         info!("initializing cpu {}: lapic id: {}", cpu.id, cpu.lapic_id);
 
         cpu.extra = idx;
-        processors.push(cpu).ok();
+        unsafe { PROCESSORS.push(cpu) };
         cpu.goto_address.write(cpu_entry);
     }
 }
 
-extern "C" fn cpu_entry(cpu: &limine::mp::Cpu) -> ! {
+extern "C" fn cpu_entry(_cpu: &limine::mp::Cpu) -> ! {
     //TODO: fix this
     let mut scheduler = cooperative::Scheduler::new();
-    let id = cpu.id;
-    scheduler.spawn(crate::scheduler::task::Task::new(async move {
-        info!("cpu {} initialized", id);
-    }));
     scheduler.run()
 }
 
@@ -174,7 +163,7 @@ pub fn kvm_base() -> u32 {
         if in_hypervisor() {
             let mut signature: [u32; 3] = [0; 3];
             for base in (0x40000000..0x40010000).step_by(0x100) {
-                let id = __cpuid(base);
+                let id = _cpuid(base);
 
                 signature[0] = id.ebx;
                 signature[1] = id.ecx;
@@ -201,34 +190,7 @@ pub fn kvm_base() -> u32 {
 }
 
 pub fn in_hypervisor() -> bool {
-    let id = unsafe { __cpuid(1) };
+    let id = _cpuid(1);
 
     (id.ecx & (1 << 31)) != 0
-}
-
-pub fn read_msr(msr: u32) -> u64 {
-    let high: u32;
-    let low: u32;
-    unsafe {
-        core::arch::asm!(
-            "rdmsr",
-            in("ecx") msr,
-            out("edx") high,
-            out("eax") low,
-        );
-    }
-    (high as u64) << 32 | low as u64
-}
-
-pub fn write_msr(msr: u32, value: u64) {
-    let high = (value >> 32) as u32;
-    let low = value as u32;
-    unsafe {
-        core::arch::asm!(
-            "wrmsr",
-            in("ecx") msr,
-            in("edx") high,
-            in("eax") low,
-        );
-    }
 }

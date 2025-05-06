@@ -3,37 +3,90 @@
     Released under EUPL 1.2 License
 */
 
-pub const ZONE_OFFSET: i16 = 240; // UTC+4:00
+use alloc::{
+    collections::btree_map::BTreeMap,
+    string::{String, ToString},
+};
 
-// pub struct Config {
-//     pub time: TimeConfig,
-// }
+pub const CONFIG_PATH: &str = include_str!("../../res/kernel.cfg");
 
-// pub struct TimeConfig {
-//     pub zone_offset: i64,
-// }
+pub struct Config {
+    pub timezone_offset: PropertyValue,
+}
 
-// i know i know, but its gonna be here until vfs
-// pub fn get_config() -> Config {
-// ! ts cause panic after reboot (sometimeis gpf sometimes pagefault)
-// let config = tomling::parse(include_str!("../../res/config.toml")).unwrap_or_default();
+#[derive(Debug, Clone)]
+pub enum PropertyValue {
+    Str(String),
+    Int(i64),
+    Bool(bool),
+}
 
-// let empty_table = tomling::Value::Table(tomling::Table::default());
+impl PropertyValue {
+    pub fn to_str(&self) -> &str {
+        match self {
+            PropertyValue::Str(s) => s,
+            _ => "",
+        }
+    }
+    pub fn to_unsliced_str(self) -> String {
+        match self {
+            PropertyValue::Str(s) => s,
+            _ => "".to_string(),
+        }
+    }
+    pub fn to_int(self) -> i64 {
+        match self {
+            PropertyValue::Int(i) => i,
+            _ => 0,
+        }
+    }
+    pub fn to_bool(self) -> bool {
+        match self {
+            PropertyValue::Bool(b) => b,
+            _ => false,
+        }
+    }
+}
 
-// let time_config = config
-//     .get("time")
-//     .unwrap_or(&empty_table)
-//     .as_table()
-//     .unwrap();
+pub fn get_config() -> Config {
+    let props = parse_config(CONFIG_PATH);
 
-// let zone = time_config
-//     .get("zone_offset")
-//     .unwrap_or(&tomling::Value::Integer(0))
-//     .as_i64()
-//     .unwrap()
-//     .clamp(-720, 840); // UTC-12:00-UTC+14:00
+    let timezone_offset = props
+        .get("timezone_offset")
+        .cloned()
+        .unwrap_or(PropertyValue::Int(0));
 
-// Config {
-//     time: TimeConfig { zone_offset: zone },
-// }
-// }
+    Config { timezone_offset }
+}
+
+fn parse_config(config: &str) -> BTreeMap<String, PropertyValue> {
+    config
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+
+            let mut parts = line.splitn(2, '=');
+            let key = parts.next()?.trim().to_string();
+            let value = parts
+                .next()?
+                .trim()
+                .split('#')
+                .next()
+                .unwrap_or("")
+                .trim_end();
+
+            let value = if let Ok(int_val) = value.parse::<i64>() {
+                PropertyValue::Int(int_val)
+            } else if let Ok(bool_val) = value.parse::<bool>() {
+                PropertyValue::Bool(bool_val)
+            } else {
+                PropertyValue::Str(value.to_string())
+            };
+
+            Some((key, value))
+        })
+        .collect()
+}

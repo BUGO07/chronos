@@ -6,30 +6,31 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use alloc::{format, string::String};
-use x86_64::instructions::port::Port;
 
-use crate::info;
+use crate::{
+    arch::interrupts::StackFrame,
+    info,
+    utils::asm::port::{outb, outl},
+};
 
 pub const PIT_FREQUENCY: u32 = 1193182;
+pub static ELAPSED_MS: AtomicU64 = AtomicU64::new(0);
 
 pub fn init() {
     info!("setting up at 1000hz...");
-    unsafe {
-        Port::new(0x43).write(0b00110100u8);
-        Port::new(0x40).write((PIT_FREQUENCY / 1000) & 0xFF);
-        Port::new(0x40).write((PIT_FREQUENCY / 1000) >> 8);
-    }
-
+    outb(0x43, 0b00110100);
+    outl(0x40, (PIT_FREQUENCY / 1000) & 0xFF);
+    outl(0x40, (PIT_FREQUENCY / 1000) >> 8);
     info!("done");
 }
 
-pub fn timer_interrupt_handler(_stack_frame: *mut crate::arch::x86_64::interrupts::StackFrame) {
+pub fn timer_interrupt_handler(_stack_frame: *mut StackFrame) {
     pit_tick();
     crate::arch::interrupts::pic::send_eoi(0);
 }
 
 pub fn elapsed_pretty(digits: u32) -> String {
-    let elapsed_ns = PIT_MS.load(Ordering::Relaxed) * 1_000_000;
+    let elapsed_ns = current_pit_ticks() * 1_000_000;
     let subsecond_ns = elapsed_ns % 1_000_000_000;
 
     let divisor = 10u64.pow(9 - digits);
@@ -52,12 +53,10 @@ pub fn elapsed_pretty(digits: u32) -> String {
     )
 }
 
-pub static PIT_MS: AtomicU64 = AtomicU64::new(0);
-
 pub fn pit_tick() {
-    PIT_MS.fetch_add(1, Ordering::Relaxed);
+    ELAPSED_MS.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn current_pit_ticks() -> u64 {
-    PIT_MS.load(Ordering::Relaxed)
+    ELAPSED_MS.load(Ordering::Relaxed)
 }

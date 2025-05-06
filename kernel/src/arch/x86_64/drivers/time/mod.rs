@@ -6,7 +6,6 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use alloc::{format, string::String};
-use pit::PIT_MS;
 
 pub mod hpet;
 pub mod kvm;
@@ -30,10 +29,6 @@ pub fn init() {
     TIMERS_INIT_STATE.store(4, Ordering::Relaxed);
     crate::arch::system::lapic::init();
     TIMERS_INIT_STATE.store(5, Ordering::Relaxed);
-}
-
-pub fn preferred_timer_ms() -> u64 {
-    preferred_timer_ns() / 1_000_000
 }
 
 pub trait KernelTimer {
@@ -67,9 +62,13 @@ pub trait KernelTimer {
     }
 }
 
+pub fn preferred_timer_ms() -> u64 {
+    preferred_timer_ns() / 1_000_000
+}
+
 pub fn preferred_timer_ns() -> u64 {
     let state = TIMERS_INIT_STATE.load(Ordering::Relaxed);
-    let pit = PIT_MS.load(Ordering::Relaxed) * 1_000_000;
+    let pit = self::pit::current_pit_ticks() * 1_000_000;
 
     unsafe {
         let kvm = crate::arch::drivers::time::kvm::KVM_TIMER

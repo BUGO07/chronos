@@ -3,9 +3,7 @@
     Released under EUPL 1.2 License
 */
 
-use core::fmt::Write;
-
-use crate::{memory::get_memory_init_stage, serial_print, utils::term::WRITERS};
+use crate::println;
 
 pub mod color {
     use alloc::{format, string::String};
@@ -77,43 +75,8 @@ pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::
         let minutes = minutes_total % 60;
         let hours = minutes_total / 60;
 
-        if get_memory_init_stage() > 0 {
-            let closure = || {
-                for writer in WRITERS.lock().iter_mut() {
-                    writer
-                        .write_fmt(format_args!(
-                            "[{:02}:{:02}:{:02}.{:0width$}] [ {}{}{} ] {}{}:{} {}\n",
-                            hours,
-                            minutes,
-                            seconds,
-                            subsecond,
-                            color,
-                            level,
-                            color::RESET,
-                            color::GRAY,
-                            module_path,
-                            color::RESET,
-                            args,
-                            width = digits as usize
-                        ))
-                        .expect("Printing to WRITER failed");
-                }
-            };
-
-            #[cfg(target_arch = "x86_64")]
-            x86_64::instructions::interrupts::without_interrupts(closure);
-
-            // *not sure but works
-            #[cfg(target_arch = "aarch64")]
-            {
-                aarch64::irq::disable();
-                closure();
-                aarch64::irq::enable();
-            }
-        }
-
-        serial_print!(
-            "[{:02}:{:02}:{:02}.{:0width$}] [ {}{}{} ] {}{}:{} {}\n",
+        println!(
+            "[{:02}:{:02}:{:02}.{:0width$}] [ {}{}{} ] {}{}:{} {}",
             hours,
             minutes,
             seconds,

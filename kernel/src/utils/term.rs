@@ -13,9 +13,6 @@ use core::{
 };
 use spin::Mutex;
 
-#[cfg(target_arch = "x86_64")]
-use x86_64::instructions::interrupts;
-
 use super::limine::get_framebuffers;
 
 lazy_static::lazy_static! {
@@ -174,7 +171,7 @@ pub fn _print(args: fmt::Arguments) {
             }
         };
         #[cfg(target_arch = "x86_64")]
-        interrupts::without_interrupts(closure);
+        crate::utils::asm::without_ints(closure);
         #[cfg(target_arch = "aarch64")]
         closure();
     }
@@ -217,7 +214,7 @@ pub fn _print_fill(what: &str, with: &str, newline: bool) {
             }
         };
         #[cfg(target_arch = "x86_64")]
-        interrupts::without_interrupts(closure);
+        crate::utils::asm::without_ints(closure);
         #[cfg(target_arch = "aarch64")]
         closure();
     }

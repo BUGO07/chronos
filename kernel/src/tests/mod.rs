@@ -3,7 +3,7 @@
     Released under EUPL 1.2 License
 */
 
-use crate::{print, println, utils::halt_loop};
+use crate::{print, println, utils::asm::halt_loop};
 
 mod memory;
 mod time;

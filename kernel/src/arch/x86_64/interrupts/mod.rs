@@ -5,7 +5,7 @@
 
 use core::arch::{asm, global_asm};
 
-use x86_64::registers::segmentation::{CS, Segment};
+use crate::utils::asm::regs::get_cs_reg;
 
 pub mod pic;
 
@@ -79,7 +79,7 @@ impl IdtEntry {
         self.offset1 = ((addr >> 16) & 0xFFFF) as u16;
         self.offset2 = (addr >> 32) as u32;
 
-        self.selector = CS::get_reg().0;
+        self.selector = get_cs_reg();
     }
 }
 

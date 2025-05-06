@@ -4,15 +4,13 @@
 */
 
 use super::task::{Task, TaskId};
-use alloc::{collections::BTreeMap, sync::Arc, task::Wake};
+use alloc::{collections::BTreeMap, sync::Arc, task::Wake, vec::Vec};
 use core::task::{Context, Poll, Waker};
-use crossbeam_queue::ArrayQueue;
-#[cfg(target_arch = "x86_64")]
-use x86_64::instructions::interrupts::{self, enable_and_hlt};
+use spin::Mutex;
 
 pub struct Scheduler {
     tasks: BTreeMap<TaskId, Task>,
-    task_queue: Arc<ArrayQueue<TaskId>>,
+    task_queue: Arc<Mutex<Vec<TaskId>>>,
     waker_cache: BTreeMap<TaskId, Waker>,
 }
 
@@ -26,7 +24,7 @@ impl Scheduler {
     pub fn new() -> Self {
         Scheduler {
             tasks: BTreeMap::new(),
-            task_queue: Arc::new(ArrayQueue::new(100)),
+            task_queue: Arc::new(Mutex::new(Vec::new())),
             waker_cache: BTreeMap::new(),
         }
     }
@@ -36,7 +34,7 @@ impl Scheduler {
         if self.tasks.insert(task.id, task).is_some() {
             panic!("task with same ID already in tasks");
         }
-        self.task_queue.push(task_id).expect("queue full");
+        self.task_queue.lock().push(task_id);
     }
 
     fn run_ready_tasks(&mut self) {
@@ -46,7 +44,7 @@ impl Scheduler {
             waker_cache,
         } = self;
 
-        while let Some(task_id) = task_queue.pop() {
+        while let Some(task_id) = task_queue.lock().pop() {
             let task = match tasks.get_mut(&task_id) {
                 Some(task) => task,
                 None => continue,
@@ -73,36 +71,22 @@ impl Scheduler {
     }
 
     fn sleep_if_idle(&self) {
-        #[cfg(target_arch = "x86_64")]
-        {
-            interrupts::disable();
-            if self.task_queue.is_empty() {
-                enable_and_hlt();
-            } else {
-                interrupts::enable();
-            }
-        }
-        #[cfg(target_arch = "aarch64")]
-        {
-            // TODO
-            // aarch64::irq::disable();
-            // if self.task_queue.is_empty() {
-            //     aarch64::irq::enable();
-            //     aarch64::instructions::halt();
-            // } else {
-            //     aarch64::irq::enable();
-            // }
+        crate::utils::asm::toggle_ints(false);
+        if self.task_queue.lock().is_empty() {
+            crate::utils::asm::halt_with_ints();
+        } else {
+            crate::utils::asm::toggle_ints(true);
         }
     }
 }
 
 struct TaskWaker {
     task_id: TaskId,
-    task_queue: Arc<ArrayQueue<TaskId>>,
+    task_queue: Arc<Mutex<Vec<TaskId>>>,
 }
 
 impl TaskWaker {
-    fn new(task_id: TaskId, task_queue: Arc<ArrayQueue<TaskId>>) -> Waker {
+    fn new(task_id: TaskId, task_queue: Arc<Mutex<Vec<TaskId>>>) -> Waker {
         Waker::from(Arc::new(TaskWaker {
             task_id,
             task_queue,
@@ -110,7 +94,7 @@ impl TaskWaker {
     }
 
     fn wake_task(&self) {
-        self.task_queue.push(self.task_id).expect("task_queue full");
+        self.task_queue.lock().push(self.task_id);
     }
 }
 
