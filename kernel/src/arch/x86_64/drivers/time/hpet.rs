@@ -4,11 +4,11 @@
 */
 
 use crate::{
-    info,
+    debug, info,
     memory::vmm::{flag, page_size},
     utils::limine::get_hhdm_offset,
 };
-use core::{cell::OnceCell, ptr::null_mut};
+use core::cell::OnceCell;
 use uacpi_sys::*;
 
 use super::KernelTimer;
@@ -20,6 +20,7 @@ static mut HPET_ADDRESS: u64 = 0;
 pub struct HpetTimer {
     start: u64,
     tickrate: u64,
+    offset_ns: u64,
     supported: bool,
 }
 
@@ -28,6 +29,7 @@ impl HpetTimer {
         HpetTimer {
             start: hpet_read(0xF0),
             tickrate,
+            offset_ns: super::preferred_timer_ns(),
             supported: true,
         }
     }
@@ -36,6 +38,7 @@ impl HpetTimer {
         HpetTimer {
             start: 0,
             tickrate: 0,
+            offset_ns: 0,
             supported: false,
         }
     }
@@ -57,6 +60,7 @@ impl KernelTimer for HpetTimer {
     fn elapsed_ns(&self) -> u64 {
         if self.supported {
             (self.elapsed_cycles() as u128 * 1_000_000_000 / self.tickrate as u128) as u64
+                + self.offset_ns // offset from main timer
         } else {
             0
         }
@@ -93,7 +97,7 @@ pub fn init() {
     let paddr = unsafe { HPET_ADDRESS };
     let address = paddr + get_hhdm_offset();
 
-    info!("mapping hpet address: 0x{:X} -> 0x{:X}", paddr, address);
+    debug!("mapping hpet address: 0x{:X} -> 0x{:X}", paddr, address);
     unsafe {
         crate::memory::vmm::PAGEMAP.get_mut().unwrap().lock().map(
             paddr + get_hhdm_offset(),
@@ -121,10 +125,7 @@ pub fn init() {
 
 fn supported() -> bool {
     unsafe {
-        let mut table: uacpi_table = uacpi_table {
-            index: 0,
-            __bindgen_anon_1: uacpi_table__bindgen_ty_1 { ptr: null_mut() },
-        };
+        let mut table: uacpi_table = uacpi_table::default();
         if uacpi_table_find_by_signature(c"HPET".as_ptr(), &raw mut table) != UACPI_STATUS_OK {
             info!("couldn't find hpet table");
             return false;

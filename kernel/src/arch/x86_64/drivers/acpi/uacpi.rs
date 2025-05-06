@@ -3,8 +3,6 @@
     Released under EUPL 1.2 License
 */
 
-#![allow(non_snake_case)]
-
 use core::{
     alloc::Layout,
     ffi::{CStr, c_void},
@@ -14,16 +12,22 @@ use core::{
 use alloc::{boxed::Box, collections::btree_map::BTreeMap};
 use spin::{Mutex, mutex::SpinMutex};
 use uacpi_sys::*;
-use x86_64::instructions::port::Port;
 
 use crate::{
-    arch::device::pci::{
-        PciAddress, pci_config_read_u8, pci_config_read_u16, pci_config_read_u32,
-        pci_config_write_u8, pci_config_write_u16, pci_config_write_u32,
+    arch::{
+        device::pci::{
+            PciAddress, pci_config_read_u8, pci_config_read_u16, pci_config_read_u32,
+            pci_config_write_u8, pci_config_write_u16, pci_config_write_u32,
+        },
+        interrupts::StackFrame,
     },
     debug, error, info,
     memory::vmm::{PAGEMAP, flag, page_size},
-    utils::{align_down, align_up, limine::get_rsdp_address},
+    utils::{
+        align_down, align_up,
+        asm::port::{inb, inl, inw, outb, outl, outw},
+        limine::get_rsdp_address,
+    },
     warn,
 };
 
@@ -168,7 +172,7 @@ extern "C" fn uacpi_kernel_io_read8(
     offset: uacpi_size,
     value: *mut uacpi_u8,
 ) -> uacpi_status {
-    unsafe { *value = Port::<u8>::new((handle as usize + offset) as u16).read() };
+    unsafe { *value = inb((handle as usize + offset) as u16) };
     UACPI_STATUS_OK
 }
 
@@ -178,7 +182,7 @@ extern "C" fn uacpi_kernel_io_read16(
     offset: uacpi_size,
     value: *mut uacpi_u16,
 ) -> uacpi_status {
-    unsafe { *value = Port::<u16>::new((handle as usize + offset) as u16).read() };
+    unsafe { *value = inw((handle as usize + offset) as u16) };
     UACPI_STATUS_OK
 }
 
@@ -188,7 +192,7 @@ extern "C" fn uacpi_kernel_io_read32(
     offset: uacpi_size,
     value: *mut uacpi_u32,
 ) -> uacpi_status {
-    unsafe { *value = Port::<u32>::new((handle as usize + offset) as u16).read() };
+    unsafe { *value = inl((handle as usize + offset) as u16) };
     UACPI_STATUS_OK
 }
 
@@ -198,7 +202,7 @@ extern "C" fn uacpi_kernel_io_write8(
     offset: uacpi_size,
     value: uacpi_u8,
 ) -> uacpi_status {
-    unsafe { Port::<u8>::new((handle as usize + offset) as u16).write(value) };
+    outb((handle as usize + offset) as u16, value);
     UACPI_STATUS_OK
 }
 
@@ -208,7 +212,7 @@ extern "C" fn uacpi_kernel_io_write16(
     offset: uacpi_size,
     value: uacpi_u16,
 ) -> uacpi_status {
-    unsafe { Port::<u16>::new((handle as usize + offset) as u16).write(value) };
+    outw((handle as usize + offset) as u16, value);
     UACPI_STATUS_OK
 }
 
@@ -218,7 +222,7 @@ extern "C" fn uacpi_kernel_io_write32(
     offset: uacpi_size,
     value: uacpi_u32,
 ) -> uacpi_status {
-    unsafe { Port::<u32>::new((handle as usize + offset) as u16).write(value) };
+    outl((handle as usize + offset) as u16, value);
     UACPI_STATUS_OK
 }
 
@@ -460,7 +464,7 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
     }
 }
 
-fn handle_uacpi_interrupt(_stack_frame: *mut crate::arch::x86_64::interrupts::StackFrame) {
+fn handle_uacpi_interrupt(_stack_frame: *mut StackFrame) {
     unsafe {
         if let Some(handler) = UACPI_INTERRUPT_HANDLER_FN {
             handler.unwrap()(UACPI_INTERRUPT_CTX.unwrap());
@@ -504,9 +508,9 @@ static mut INTS_ENABLED: bool = true;
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flags {
     if !handle.is_null() {
-        let ints_enabled = x86_64::instructions::interrupts::are_enabled();
+        let ints_enabled = crate::utils::asm::int_status();
         if ints_enabled {
-            x86_64::instructions::interrupts::disable();
+            crate::utils::asm::toggle_ints(false);
         }
         let lock = unsafe { &*(handle as *const SpinMutex<()>) };
         lock.lock();
@@ -521,7 +525,7 @@ extern "C" fn uacpi_kernel_unlock_spinlock(handle: uacpi_handle) {
         let lock = unsafe { &*(handle as *const SpinMutex<()>) };
         unsafe { lock.force_unlock() };
         if unsafe { INTS_ENABLED } {
-            x86_64::instructions::interrupts::enable();
+            crate::utils::asm::toggle_ints(true);
         }
     }
 }

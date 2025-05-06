@@ -3,16 +3,16 @@
     Released under EUPL 1.2 License
 */
 
-use x86_64::instructions::{interrupts, port::Port};
-
 use core::fmt::Write;
+
+use crate::utils::asm::port::outb;
 
 pub struct SerialWriter;
 
 impl Write for SerialWriter {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for byte in s.bytes() {
-            unsafe { Port::new(0xe9).write(byte) };
+            outb(0xe9, byte);
         }
         Ok(())
     }
@@ -20,7 +20,7 @@ impl Write for SerialWriter {
 
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
-    interrupts::without_interrupts(|| {
+    crate::utils::asm::without_ints(|| {
         write!(SerialWriter, "{args}").ok();
     });
 }

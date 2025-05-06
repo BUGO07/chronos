@@ -17,15 +17,17 @@ use alloc::{
     vec::Vec,
 };
 use spin::Mutex;
-use x86_64::registers::segmentation::{CS, SS, Segment};
 
 use crate::{
     arch::{interrupts::StackFrame, system::lapic},
     memory::{
-        ALLOCATOR, STACK_SIZE,
+        STACK_SIZE,
         vmm::{PAGEMAP, Pagemap},
     },
-    utils::halt_loop,
+    utils::asm::{
+        halt_loop,
+        regs::{get_cs_reg, get_ss_reg},
+    },
 };
 
 static NEXT_PID: AtomicU64 = AtomicU64::new(0);
@@ -77,11 +79,7 @@ unsafe impl Send for Thread {}
 impl Thread {
     pub fn new(proc: Arc<Mutex<Process>>, func: u64) -> Self {
         let _kstack = unsafe {
-            ALLOCATOR
-                .lock()
-                .malloc(Layout::from_size_align(STACK_SIZE, 0x8).unwrap())
-                .unwrap()
-                .as_ptr() as u64
+            alloc::alloc::alloc(Layout::from_size_align(STACK_SIZE, 0x8).unwrap()) as u64
         };
         Self {
             _tid: proc.lock().next_tid(),
@@ -89,8 +87,8 @@ impl Thread {
             regs: StackFrame {
                 rsp: _kstack + STACK_SIZE as u64,
                 rip: func,
-                cs: CS::get_reg().0 as u64,
-                ss: SS::get_reg().0 as u64,
+                cs: get_cs_reg() as u64,
+                ss: get_ss_reg() as u64,
                 rflags: 0x202,
                 ..Default::default()
             },
@@ -154,8 +152,6 @@ pub fn new_thread(proc: Arc<Mutex<Process>>, func: usize) {
 }
 
 pub fn init() -> ! {
-    unsafe {
-        asm!("int $0xFF");
-    }
+    unsafe { asm!("int $0xFF") };
     halt_loop();
 }

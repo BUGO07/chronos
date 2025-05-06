@@ -22,7 +22,7 @@ pub fn early_init() {
     TIMERS_INIT_STATE.store(1, Ordering::Relaxed);
 }
 
-pub fn init() {} // :/
+pub fn init() {}
 
 pub fn preferred_timer_ms() -> u64 {
     preferred_timer_ns() / 1_000_000

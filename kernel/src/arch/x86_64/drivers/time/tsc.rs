@@ -3,9 +3,9 @@
     Released under EUPL 1.2 License
 */
 
-use core::{arch::x86_64::_rdtsc, cell::OnceCell, sync::atomic::Ordering};
+use core::{cell::OnceCell, sync::atomic::Ordering};
 
-use crate::info;
+use crate::{debug, info, utils::asm::_rdtsc};
 
 use super::{KernelTimer, pit::current_pit_ticks};
 
@@ -19,13 +19,13 @@ pub struct TscTimer {
 impl TscTimer {
     pub fn start() -> Self {
         TscTimer {
-            start: unsafe { _rdtsc() },
+            start: _rdtsc(),
             supported: false,
         }
     }
 
     pub fn elapsed_cycles(&self) -> u64 {
-        unsafe { _rdtsc() - self.start }
+        _rdtsc() - self.start
     }
 
     pub fn set_supported(&mut self, supported: bool) {
@@ -64,12 +64,12 @@ pub fn measure_cpu_frequency() -> u64 {
     let mut cpu_freq_hz = 0;
 
     for _ in 0..3 {
-        let start_cycles = unsafe { _rdtsc() };
+        let start_cycles = _rdtsc();
         let start_ticks = current_pit_ticks();
 
         while start_ticks + 50 > current_pit_ticks() {}
 
-        let end_cycles = unsafe { _rdtsc() };
+        let end_cycles = _rdtsc();
         let end_ticks = current_pit_ticks();
 
         let elapsed_ticks = end_ticks - start_ticks;
@@ -88,7 +88,7 @@ pub fn init() {
         info!("setting up...");
         TSC_TIMER.set(TscTimer::start()).ok();
         let freq = measure_cpu_frequency();
-        info!("cpu frequency - {}hz", freq);
+        debug!("cpu frequency - {}hz", freq);
         crate::arch::x86_64::CPU_FREQ.store(freq, Ordering::Relaxed);
         TSC_TIMER.get_mut().unwrap().set_supported(true);
         info!("done");

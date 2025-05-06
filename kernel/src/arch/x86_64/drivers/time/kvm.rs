@@ -3,14 +3,17 @@
     Released under EUPL 1.2 License
 */
 
-use core::{
-    arch::x86_64::{__cpuid, _rdtsc},
-    cell::OnceCell,
-};
+use core::cell::OnceCell;
 
 use alloc::sync::Arc;
 
-use crate::{info, utils::limine::get_hhdm_offset};
+use crate::{
+    info,
+    utils::{
+        asm::{_cpuid, _rdtsc, regs::wrmsr},
+        limine::get_hhdm_offset,
+    },
+};
 
 use super::KernelTimer;
 
@@ -40,7 +43,7 @@ impl KernelTimer for KvmTimer {
     fn elapsed_ns(&self) -> u64 {
         if self.supported {
             let table = &self.table_pointer;
-            let mut time: u128 = unsafe { _rdtsc() as u128 } - table.tsc_timestamp as u128;
+            let mut time: u128 = _rdtsc() as u128 - table.tsc_timestamp as u128;
             if table.tsc_shift >= 0 {
                 time <<= table.tsc_shift;
             } else {
@@ -84,7 +87,7 @@ pub fn init() {
         let ptr = Arc::as_ptr(&timer.table_pointer) as u64;
         timer.supported = true;
         info!("setting up...");
-        crate::arch::system::cpu::write_msr(0x4b564d01, (ptr - get_hhdm_offset()) | 1);
+        wrmsr(0x4b564d01, (ptr - get_hhdm_offset()) | 1);
         unsafe {
             STARTUP_OFFSET = timer.elapsed_ns() - (super::pit::current_pit_ticks() / 1_000_000)
         };
@@ -98,7 +101,7 @@ pub fn supported() -> bool {
     let mut is_supported = false;
     let base = crate::arch::system::cpu::kvm_base();
     if base != 0 {
-        let id = unsafe { __cpuid(0x40000001) };
+        let id = _cpuid(0x40000001);
         is_supported = (id.eax & (1 << 3)) != 0
     }
     is_supported

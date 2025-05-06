@@ -17,8 +17,7 @@ Contributors are welcome.
 - PIT + TSC + KVM + HPET + LAPIC
 - RTC
 - Memory Management
-- PS/2 Keyboard
-- PS/2 Mouse
+- PS/2 Keyboard and Mouse
 - Preemptive Scheduler (single core for now)
 - ACPI
 - Basic PCI

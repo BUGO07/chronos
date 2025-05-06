@@ -15,8 +15,6 @@ use x86_64::{
 
 use crate::{debug, info};
 
-pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
-
 struct Selectors {
     code_selector: SegmentSelector,
     data_selector: SegmentSelector,
@@ -41,7 +39,7 @@ lazy_static::lazy_static! {
 
     static ref TSS: TaskStateSegment = {
         let mut tss = TaskStateSegment::new();
-        tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
+        tss.interrupt_stack_table[0] = {
 
             let stack_start = VirtAddr::from_ptr(&raw const crate::memory::STACK);
             stack_start + crate::memory::STACK_SIZE as u64 // stack_end

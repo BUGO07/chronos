@@ -11,7 +11,7 @@ use crate::{
     print_fill, println,
     scheduler::{Scheduler, Task},
     utils::{
-        halt_loop,
+        asm::halt_loop,
         limine::{get_bootloader_info, get_framebuffers},
     },
 };
@@ -26,6 +26,7 @@ pub fn _start() -> ! {
 
     self::drivers::time::early_init();
     crate::memory::init();
+    self::drivers::time::init();
 
     println!();
     print_fill!("-");

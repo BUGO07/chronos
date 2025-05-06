@@ -3,13 +3,16 @@
     Released under EUPL 1.2 License
 */
 
+use core::cell::OnceCell;
+
 use alloc::vec::Vec;
-use conquer_once::spin::OnceCell;
-use x86_64::instructions::port::Port;
 
-use crate::info;
+use crate::{
+    info,
+    utils::asm::port::{inl, outl},
+};
 
-pub static PCI_DEVICES: OnceCell<Vec<PciDevice>> = OnceCell::uninit();
+pub static mut PCI_DEVICES: OnceCell<Vec<PciDevice>> = OnceCell::new();
 
 #[derive(Debug)]
 pub struct PciDevice {
@@ -50,12 +53,8 @@ pub fn pci_config_read_u16(addr: PciAddress, offset: u8) -> u16 {
 
 pub fn pci_config_read_u32(addr: PciAddress, offset: u8) -> u32 {
     let address = addr.config_address(offset);
-    unsafe {
-        let mut port_cf8 = Port::<u32>::new(0xCF8);
-        let mut port_cfc = Port::<u32>::new(0xCFC);
-        port_cf8.write(address);
-        port_cfc.read()
-    }
+    outl(0xCF8, address);
+    inl(0xCFC)
 }
 
 pub fn pci_config_write_u8(addr: PciAddress, offset: u8, value: u8) {
@@ -76,12 +75,8 @@ pub fn pci_config_write_u16(addr: PciAddress, offset: u8, value: u16) {
 
 pub fn pci_config_write_u32(addr: PciAddress, offset: u8, value: u32) {
     let address = addr.config_address(offset);
-    unsafe {
-        let mut port_cf8 = Port::<u32>::new(0xCF8);
-        let mut port_cfc = Port::<u32>::new(0xCFC);
-        port_cf8.write(address);
-        port_cfc.write(value);
-    }
+    outl(0xCF8, address);
+    outl(0xCFC, value);
 }
 
 //TODO: make it faster with mmio
@@ -144,5 +139,5 @@ pub fn pci_enumerate() {
             }
         }
     }
-    PCI_DEVICES.init_once(|| devices);
+    unsafe { PCI_DEVICES.set(devices).unwrap() };
 }

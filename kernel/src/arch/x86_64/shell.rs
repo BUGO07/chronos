@@ -13,8 +13,8 @@ use pc_keyboard::{DecodedKey, KeyCode};
 
 use crate::{
     arch::drivers::time::{self, KernelTimer},
-    print, print_fill, println,
-    utils::{halt_loop, logger::color},
+    print, println,
+    utils::{asm::halt_loop, logger::color},
 };
 
 use super::drivers::keyboard::KeyboardState;
@@ -123,7 +123,7 @@ impl Shell {
             DecodedKey::RawKey(key) => match key {
                 KeyCode::ArrowUp => {
                     if !self.last_commands.is_empty() {
-                        print_fill!("\x08 \x08", "", false);
+                        print!("\x1b[2K\x1b[1G");
                         if !self.input.is_empty() {
                             self.prev_commands
                                 .push(String::from_utf8(self.input.clone()).unwrap());
@@ -131,11 +131,11 @@ impl Shell {
                         self.input.clear();
                         let last_input = self.last_commands.pop().unwrap();
                         self.input = last_input.as_bytes().to_vec();
-                        print!("$ {}", last_input);
+                        print!("$ {last_input}");
                     }
                 }
                 KeyCode::ArrowDown => {
-                    print_fill!("\x08 \x08", "", false);
+                    print!("\x1b[2K\x1b[1G");
                     if !self.input.is_empty() {
                         self.last_commands
                             .push(String::from_utf8(self.input.clone()).unwrap());
@@ -145,7 +145,7 @@ impl Shell {
                     if !self.prev_commands.is_empty() {
                         let last_input = self.prev_commands.pop().unwrap();
                         self.input = last_input.as_bytes().to_vec();
-                        print!("$ {}", last_input);
+                        print!("$ {last_input}");
                     } else {
                         print!("$ ");
                     }
@@ -210,15 +210,15 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             }
         }
         "date" => {
+            let default_zone = crate::utils::config::get_config().timezone_offset.to_int();
             let zone = if args.is_empty() {
-                // config.time.zone_offset
-                crate::utils::config::ZONE_OFFSET
+                default_zone
             } else {
-                args[0].parse().unwrap_or(crate::utils::config::ZONE_OFFSET)
+                args[0].parse().unwrap_or(default_zone)
             };
 
             let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
-                .with_timezone_offset(zone)
+                .with_timezone_offset(zone.clamp(-720, 840) as i16)
                 .adjusted_for_timezone();
             println!(
                 "{} | {}",
@@ -228,6 +228,9 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
         }
         "clear" => {
             print!("\x1b[2J\x1b[H");
+        }
+        "cursor_info" => {
+            print!("\x1b[6n");
         }
         "color" => {
             let fg = if !args.is_empty() {

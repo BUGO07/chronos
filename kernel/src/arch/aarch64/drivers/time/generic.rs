@@ -5,9 +5,10 @@
 
 use core::cell::OnceCell;
 
-use aarch64::regs::{CNTFRQ_EL0, CNTPCT_EL0, Readable};
-
-use crate::info;
+use crate::{
+    info,
+    utils::asm::regs::{get_cntfrq, get_cntpct},
+};
 
 use super::KernelTimer;
 
@@ -22,7 +23,7 @@ pub struct GenericTimer {
 impl GenericTimer {
     pub fn start(tickrate: u64) -> Self {
         GenericTimer {
-            start: CNTPCT_EL0.get(),
+            start: get_cntpct(),
             tickrate,
             supported: true,
         }
@@ -38,7 +39,7 @@ impl GenericTimer {
 
     pub fn elapsed_cycles(&self) -> u64 {
         if self.supported {
-            CNTPCT_EL0.get() - self.start
+            get_cntpct() - self.start
         } else {
             0
         }
@@ -69,12 +70,10 @@ impl KernelTimer for GenericTimer {
 
 pub fn init() {
     info!("initializing generic timer...");
-    let tickrate = CNTFRQ_EL0.get();
+    let tickrate = get_cntfrq();
     info!("tickrate - {}hz", tickrate);
     unsafe {
-        GENERIC_TIMER
-            .set(GenericTimer::start(CNTFRQ_EL0.get()))
-            .ok();
+        GENERIC_TIMER.set(GenericTimer::start(tickrate)).ok();
     }
     info!("done");
 }
