@@ -12,7 +12,8 @@
     clippy::missing_safety_doc,
     clippy::single_match,
     clippy::manual_dangling_ptr,
-    clippy::empty_loop
+    clippy::empty_loop,
+    clippy::not_unsafe_ptr_arg_deref
 )]
 #![cfg_attr(
     feature = "tests",

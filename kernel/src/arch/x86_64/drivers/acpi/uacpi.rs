@@ -6,6 +6,7 @@
 use core::{
     alloc::Layout,
     ffi::{CStr, c_void},
+    ptr::null_mut,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -259,7 +260,7 @@ extern "C" fn uacpi_kernel_alloc(size: uacpi_size) -> *mut c_void {
         .unwrap();
         let mem = alloc::alloc::alloc(layout);
         if mem.is_null() {
-            return core::ptr::null_mut();
+            return null_mut();
         }
         *(mem as *mut usize) = size;
         mem.add(core::mem::size_of::<usize>()) as *mut c_void

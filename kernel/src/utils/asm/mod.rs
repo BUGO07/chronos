@@ -6,6 +6,8 @@
 use core::arch::asm;
 
 #[cfg(target_arch = "x86_64")]
+pub mod mem;
+#[cfg(target_arch = "x86_64")]
 pub mod port;
 
 pub mod mmio;

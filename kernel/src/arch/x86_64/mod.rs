@@ -119,23 +119,23 @@ pub fn _start() -> ! {
     info!("x86_64 kernel starting...\n");
 
     crate::memory::init();
-    crate::arch::system::cpu::init_bsp();
-    crate::arch::gdt::init();
-    crate::arch::interrupts::init_idt();
-    crate::arch::interrupts::pic::init();
-    crate::arch::interrupts::pic::unmask_all(); // limine masks all IRQs by default // todo: fix ts
+    self::system::cpu::init_bsp();
+    self::gdt::init();
+    self::interrupts::init_idt();
+    self::interrupts::pic::init();
+    self::interrupts::pic::unmask_all(); // limine masks all IRQs by default // todo: fix ts
 
     crate::utils::asm::toggle_ints(true);
 
-    crate::arch::drivers::time::early_init();
+    self::drivers::time::early_init();
 
-    crate::arch::drivers::acpi::init();
+    self::drivers::acpi::init();
 
     #[cfg(feature = "uacpi_test")]
-    crate::arch::drivers::acpi::shutdown();
+    self::drivers::acpi::shutdown();
 
-    crate::arch::drivers::time::init();
-    crate::arch::system::cpu::init();
+    self::drivers::time::init();
+    self::system::cpu::init();
 
     #[cfg(feature = "tests")]
     crate::tests::init();
