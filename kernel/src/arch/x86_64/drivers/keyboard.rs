@@ -27,6 +27,7 @@ pub fn keyboard_thread() -> ! {
     let keyboard_state = unsafe { &mut KEYBOARD_STATE };
 
     loop {
+        crate::utils::asm::halt();
         if keyboard_state.scancodes.is_empty() {
             continue;
         }
@@ -47,8 +48,8 @@ pub fn keyboard_thread() -> ! {
                     crate::arch::shell::SHELL
                         .get_mut()
                         .unwrap()
-                        .key_event(dc, keyboard_state)
-                };
+                        .key_event(dc, keyboard_state);
+                }
             }
         }
     }

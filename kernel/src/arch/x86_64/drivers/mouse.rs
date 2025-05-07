@@ -8,10 +8,8 @@ use spin::Mutex;
 
 use crate::{arch::interrupts::StackFrame, error, info, utils::asm::port::inb};
 
-lazy_static::lazy_static! {
-    pub static ref DRIVER: Mutex<Mouse> = Mutex::new(Mouse::new());
-    pub static ref MOUSE: Mutex<MouseInfo> = Mutex::new(MouseInfo::new());
-}
+pub static DRIVER: Mutex<Mouse> = Mutex::new(Mouse::new());
+pub static MOUSE: Mutex<MouseInfo> = Mutex::new(MouseInfo::new());
 
 pub struct MouseInfo {
     x: u16,
@@ -28,7 +26,7 @@ impl Default for MouseInfo {
 }
 
 impl MouseInfo {
-    pub fn new() -> MouseInfo {
+    pub const fn new() -> MouseInfo {
         MouseInfo {
             state: MouseState::new(),
             x: 0,

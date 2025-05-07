@@ -32,8 +32,8 @@ lazy_static::lazy_static! {
 pub fn shell_thread() -> ! {
     unsafe { SHELL.set(Shell::new()).ok() };
     print!("$ ");
-    halt_loop()
-    //TODO: implement thread sleep to make cursor blink work
+    halt_loop();
+    //TODO: implement thread sleep to make cursor blink work (default ansi way doesnt work)
     // let mut visible = true;
 
     // loop {

@@ -3,9 +3,6 @@
     Released under EUPL 1.2 License
 */
 
-#[cfg(target_arch = "x86_64")]
-pub mod cmem;
-
 pub mod asm;
 pub mod config;
 pub mod limine;

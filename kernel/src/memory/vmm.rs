@@ -3,7 +3,7 @@
     Released under EUPL 1.2 License
 */
 
-use core::{alloc::Layout, cell::OnceCell};
+use core::{alloc::Layout, cell::OnceCell, ptr::null_mut};
 
 use crate::utils::{align_down, align_up};
 use alloc::sync::Arc;
@@ -124,20 +124,18 @@ fn alloc_table() -> *mut Table {
 
 fn get_next_level(top_level: *mut Table, idx: u64, allocate: bool) -> *mut Table {
     unsafe {
-        let entry = (top_level as u64 + idx * 8) as *mut u64;
+        let entry = top_level.cast::<u64>().add(idx as usize);
         if *entry & flag::PRESENT != 0 {
-            // ! this overflows on debug builds on my laptop;
-            // println!("0x{:X}", *entry & 0x000FFFFFFFFFF000);
             return ((*entry & 0x000FFFFFFFFFF000) + super::get_hhdm_offset()) as *mut Table;
         }
 
         if !allocate {
-            return core::ptr::null_mut();
+            return null_mut();
         }
 
-        let next_level = alloc_table();
-        *entry = (next_level as u64) | flag::PRESENT | flag::WRITE | flag::USER;
-        (next_level as u64 + super::get_hhdm_offset()) as *mut Table
+        let next_level = alloc_table() as u64;
+        *entry = next_level | flag::PRESENT | flag::WRITE | flag::USER;
+        (next_level + super::get_hhdm_offset()) as *mut Table
     }
 }
 

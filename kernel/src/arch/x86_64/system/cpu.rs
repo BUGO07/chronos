@@ -159,30 +159,28 @@ pub fn read_registers() -> Registers {
 }
 
 pub fn kvm_base() -> u32 {
-    unsafe {
-        if in_hypervisor() {
-            let mut signature: [u32; 3] = [0; 3];
-            for base in (0x40000000..0x40010000).step_by(0x100) {
-                let id = _cpuid(base);
+    if in_hypervisor() {
+        let mut signature: [u32; 3] = [0; 3];
+        for base in (0x40000000..0x40010000).step_by(0x100) {
+            let id = _cpuid(base);
 
-                signature[0] = id.ebx;
-                signature[1] = id.ecx;
-                signature[2] = id.edx;
+            signature[0] = id.ebx;
+            signature[1] = id.ecx;
+            signature[2] = id.edx;
 
-                let mut output: [u8; 12] = [0; 12];
+            let mut output: [u8; 12] = [0; 12];
 
-                for (i, num) in signature.iter().enumerate() {
-                    let bytes = num.to_le_bytes();
-                    output[i * 4..(i + 1) * 4].copy_from_slice(&bytes);
-                }
-                if crate::utils::cmem::memcmp(
-                    c"KVMKVMKVM".as_ptr() as *const c_void,
-                    output.as_ptr() as *const c_void,
-                    12,
-                ) != 0
-                {
-                    return base;
-                }
+            for (i, num) in signature.iter().enumerate() {
+                let bytes = num.to_le_bytes();
+                output[i * 4..(i + 1) * 4].copy_from_slice(&bytes);
+            }
+            if crate::utils::asm::mem::memcmp(
+                c"KVMKVMKVM".as_ptr() as *const c_void,
+                output.as_ptr() as *const c_void,
+                12,
+            ) != 0
+            {
+                return base;
             }
         }
     }

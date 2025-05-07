@@ -116,15 +116,10 @@ impl Writer {
     }
 
     fn write(&mut self, s: &str) {
-        let buf;
         #[cfg(target_arch = "x86_64")]
-        {
-            buf = s.as_ptr() as *const i8;
-        }
+        let buf = s.as_ptr() as *const i8;
         #[cfg(target_arch = "aarch64")]
-        {
-            buf = s.as_ptr();
-        }
+        let buf = s.as_ptr();
         unsafe { flanterm_sys::flanterm_write(self.ctx, buf, s.len()) };
     }
 }

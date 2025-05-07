@@ -9,19 +9,19 @@ opt-level = 1
 lto = "thin"
 
 [profile.release] # x86_64 release profile
-opt-level = 1 # 2 and 3 make scheduler not work properly
-# codegen-units = 1 # ts now bootloops
+opt-level = 3
+codegen-units = 1
 strip = true
-lto = "thin" # fat lto bootloops too
+lto = "fat"
 
 [profile.smol]
 inherits = "release"
 opt-level = "z"
-# codegen-units = 1
-strip = false
-lto = "thin"
+codegen-units = 1
+strip = true
+lto = "fat"
 
-[profile.armrel] # aarch64 release profile
+[profile.armrel] # aarch64 release profile | seperate jic x86_64 breaks
 inherits = "release"
 opt-level = 3
 codegen-units = 1

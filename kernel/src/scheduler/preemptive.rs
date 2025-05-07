@@ -100,27 +100,24 @@ impl Thread {
 pub fn schedule(regs: *mut StackFrame) {
     let next = next_thread();
     if let Some(ct) = unsafe { CURRENT_THREAD.clone() } {
-        unsafe {
-            crate::utils::cmem::memcpy(
-                &raw mut ct.lock().regs as *mut c_void,
-                regs as *mut c_void,
-                size_of::<StackFrame>(),
-            );
-        }
+        crate::utils::asm::mem::memcpy(
+            &raw mut ct.lock().regs as *mut c_void,
+            regs as *mut c_void,
+            size_of::<StackFrame>(),
+        );
     }
     if let Some(n) = next {
         if let Some(ct) = unsafe { CURRENT_THREAD.clone() } {
             enqueue(ct)
         }
 
-        unsafe {
-            CURRENT_THREAD = Some(Arc::clone(&n));
-            crate::utils::cmem::memcpy(
-                regs as *mut c_void,
-                &raw const n.lock().regs as *const c_void,
-                size_of::<StackFrame>(),
-            )
-        };
+        unsafe { CURRENT_THREAD = Some(Arc::clone(&n)) };
+
+        crate::utils::asm::mem::memcpy(
+            regs as *mut c_void,
+            &raw const n.lock().regs as *const c_void,
+            size_of::<StackFrame>(),
+        );
     }
     lapic::arm(TIMESLICE * 1_000_000, 0xFF);
 }
