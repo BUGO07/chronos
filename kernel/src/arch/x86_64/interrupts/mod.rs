@@ -3,8 +3,6 @@
     Released under EUPL 1.2 License
 */
 
-use core::arch::{asm, global_asm};
-
 use crate::utils::asm::regs::get_cs_reg;
 
 pub mod pic;
@@ -39,7 +37,7 @@ pub struct StackFrame {
 
 #[repr(C)]
 #[repr(packed)]
-struct IdtPtr {
+pub struct IdtPtr {
     limit: u16,
     base: u64,
 }
@@ -83,7 +81,7 @@ impl IdtEntry {
     }
 }
 
-global_asm! {
+core::arch::global_asm! {
     r#"
 .extern isr_handler
 isr_common_stub:
@@ -223,24 +221,16 @@ unsafe extern "C" {
     static isr_table: u64;
 }
 
-pub fn init_idt() {
+pub fn init() {
     let table = &raw const isr_table;
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..256 {
-        unsafe {
-            IDT[i].set(*table.add(i), None, None);
+    unsafe {
+        for (i, entry) in IDT.iter_mut().enumerate() {
+            entry.set(*table.add(i), None, None);
         }
-    }
-    #[allow(static_mut_refs)]
-    unsafe {
-        IDTR.base = IDT.as_ptr() as u64
-    };
+        IDTR.base = IDT.as_ptr() as u64;
 
-    unsafe {
-        asm!("cli; lidt [{}]", in(reg) &raw const IDTR, options(nostack));
-    }
+        crate::utils::asm::regs::load_idt(&IDTR);
 
-    unsafe {
         HANDLERS[0x20] = Some(crate::arch::drivers::time::pit::timer_interrupt_handler);
         HANDLERS[0x21] = Some(crate::arch::drivers::keyboard::keyboard_interrupt_handler);
     }

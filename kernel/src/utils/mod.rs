@@ -8,6 +8,7 @@ pub mod config;
 pub mod limine;
 pub mod logger;
 pub mod term;
+pub mod time;
 
 #[inline(always)]
 pub const fn align_up(addr: u64, align: u64) -> u64 {

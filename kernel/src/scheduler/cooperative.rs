@@ -3,9 +3,12 @@
     Released under EUPL 1.2 License
 */
 
-use super::task::{Task, TaskId};
-use alloc::{collections::BTreeMap, sync::Arc, task::Wake, vec::Vec};
-use core::task::{Context, Poll, Waker};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, task::Wake, vec::Vec};
+use core::{
+    pin::Pin,
+    sync::atomic::{AtomicU64, Ordering},
+    task::{Context, Poll, Waker},
+};
 use spin::Mutex;
 
 pub struct Scheduler {
@@ -105,5 +108,38 @@ impl Wake for TaskWaker {
 
     fn wake_by_ref(self: &Arc<Self>) {
         self.wake_task();
+    }
+}
+
+pub struct Task {
+    pub id: TaskId,
+    future: Pin<Box<dyn Future<Output = ()>>>,
+}
+
+impl Task {
+    pub fn new(future: impl Future<Output = ()> + 'static) -> Task {
+        Task {
+            id: TaskId::new(),
+            future: Box::pin(future),
+        }
+    }
+    pub fn poll(&mut self, context: &mut Context) -> Poll<()> {
+        self.future.as_mut().poll(context)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TaskId(u64);
+
+impl Default for TaskId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TaskId {
+    pub fn new() -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        TaskId(NEXT_ID.fetch_add(1, Ordering::Relaxed))
     }
 }

@@ -12,9 +12,10 @@ use alloc::{
 use pc_keyboard::{DecodedKey, KeyCode};
 
 use crate::{
-    arch::drivers::time::{self, KernelTimer},
+    arch::drivers::time,
+    drivers::acpi,
     print, println,
-    utils::{asm::halt_loop, logger::color},
+    utils::{asm::halt_loop, logger::color, time::KernelTimer},
 };
 
 use super::drivers::keyboard::KeyboardState;
@@ -33,7 +34,7 @@ pub fn shell_thread() -> ! {
     unsafe { SHELL.set(Shell::new()).ok() };
     print!("$ ");
     halt_loop();
-    //TODO: implement thread sleep to make cursor blink work (default ansi way doesnt work)
+    // TODO: implement thread sleep to make cursor blink work (default ansi way doesnt work)
     // let mut visible = true;
 
     // loop {
@@ -170,7 +171,7 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             bg [x] changes the background of the terminal (like windows or use hex)\n\t\
             echo [what] - echoes the input\n\t\
             nooo - prints nooo\n\t\
-            shutdown - shuts down the system\n\t\
+            shutdown - shuts the system down\n\t\
             reboot - reboots the system\n\t\
             suspend - suspends the system\n\t\
             hibernate - hibernates the system\n\t\
@@ -245,7 +246,6 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                     "7" => color::WHITE.to_string(),
                     "8" => color::GRAY.to_string(),
                     "9" => color::BLUE.to_string(),
-                    //TODO: make lighter variants of the following
                     "a" => color::LIGHT_GREEN.to_string(),
                     "b" => color::CYAN.to_string(),
                     "c" => color::LIGHT_RED.to_string(),
@@ -294,7 +294,6 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             println!("{}{}", shell.color_fg, bg);
         }
         "bg" => {
-            // repeated code ik
             let bg = if !args.is_empty() {
                 match args[0] {
                     "0" => color::BLACK_BG.to_string(),
@@ -307,7 +306,6 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                     "7" => color::WHITE_BG.to_string(),
                     "8" => color::GRAY_BG.to_string(),
                     "9" => color::BLUE_BG.to_string(),
-                    //TODO: make lighter variants of the following
                     "a" => color::LIGHT_GREEN_BG.to_string(),
                     "b" => color::CYAN_BG.to_string(),
                     "c" => color::LIGHT_RED_BG.to_string(),
@@ -362,24 +360,16 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             println!("\n{}\n", crate::NOOO);
         }
         "shutdown" => {
-            crate::arch::drivers::acpi::perform_power_action(
-                super::drivers::acpi::PowerAction::Shutdown,
-            );
+            acpi::perform_power_action(acpi::PowerAction::Shutdown);
         }
         "reboot" => {
-            crate::arch::drivers::acpi::perform_power_action(
-                super::drivers::acpi::PowerAction::Reboot,
-            );
+            acpi::perform_power_action(acpi::PowerAction::Reboot);
         }
         "sleep" => {
-            crate::arch::drivers::acpi::perform_power_action(
-                super::drivers::acpi::PowerAction::Sleep,
-            );
+            acpi::perform_power_action(acpi::PowerAction::Sleep);
         }
         "hibernate" => {
-            crate::arch::drivers::acpi::perform_power_action(
-                super::drivers::acpi::PowerAction::Hibernate,
-            );
+            acpi::perform_power_action(acpi::PowerAction::Hibernate);
         }
         "pagefault" => {
             unsafe { *(0xdeadbeef as *mut u8) = 42 };

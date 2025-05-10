@@ -47,7 +47,7 @@ pub fn init() {
         &time::hpet_timer,
         &time::preferred_timer,
     ]);
-    crate::arch::drivers::acpi::shutdown();
+    crate::drivers::acpi::shutdown();
     halt_loop()
 }
 

@@ -17,16 +17,18 @@ use crate::{
 };
 use core::panic::PanicInfo;
 
-pub mod device;
 pub mod drivers;
+pub mod interrupts;
 
 pub fn _start() -> ! {
     println!("\n{NOOO}\n");
     info!("aarch64 kernel starting...\n");
-
     self::drivers::time::early_init();
     crate::memory::init();
+    self::interrupts::init();
+    self::interrupts::gic::init();
     self::drivers::time::init();
+    // crate::drivers::acpi::init(); // TODO: implement mmu for acpi to work
 
     println!();
     print_fill!("-");

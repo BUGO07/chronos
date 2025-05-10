@@ -47,12 +47,11 @@ pub fn init() {
     let psize = page_size::SMALL;
 
     let success = unsafe {
-        crate::memory::vmm::PAGEMAP.get_mut().unwrap().lock().map(
-            mmio,
-            phys_mmio,
-            flag::PRESENT | flag::WRITE,
-            psize,
-        )
+        crate::memory::vmm::PAGEMAP
+            .get_mut()
+            .unwrap()
+            .lock()
+            .map(mmio, phys_mmio, flag::RW, psize)
     };
 
     if !success {

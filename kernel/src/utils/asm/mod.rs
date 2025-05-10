@@ -5,7 +5,6 @@
 
 use core::arch::asm;
 
-#[cfg(target_arch = "x86_64")]
 pub mod mem;
 #[cfg(target_arch = "x86_64")]
 pub mod port;
@@ -70,7 +69,7 @@ pub fn int_status() -> bool {
         asm!("pushfq; pop {}", out(reg) r);
     }
     #[cfg(target_arch = "aarch64")]
-    return (r >> 7) & 1 != 0; // IRQs
+    return (r >> 7) & 1 == 0; // IRQs
     #[cfg(target_arch = "x86_64")]
     return (r & (1 << 9)) != 0;
 }
@@ -142,4 +141,13 @@ pub fn _rdtsc() -> u64 {
         );
     }
     ((high as u64) << 32) | (low as u64)
+}
+
+#[inline(always)]
+pub fn delay() {
+    for _ in 0..5 {
+        unsafe {
+            asm!("nop", options(nomem, nostack, preserves_flags));
+        }
+    }
 }

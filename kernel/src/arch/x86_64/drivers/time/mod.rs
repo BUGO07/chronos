@@ -5,7 +5,9 @@
 
 use core::sync::atomic::{AtomicU8, Ordering};
 
-use alloc::{format, string::String};
+use alloc::string::String;
+
+use crate::utils::time::KernelTimer;
 
 pub mod hpet;
 pub mod kvm;
@@ -29,37 +31,6 @@ pub fn init() {
     TIMERS_INIT_STATE.store(4, Ordering::Relaxed);
     crate::arch::system::lapic::init();
     TIMERS_INIT_STATE.store(5, Ordering::Relaxed);
-}
-
-pub trait KernelTimer {
-    fn name(&self) -> &'static str;
-    fn is_supported(&self) -> bool;
-    fn priority(&self) -> u8;
-    fn elapsed_ns(&self) -> u64;
-
-    fn elapsed_pretty(&self, digits: u32) -> String {
-        let elapsed_ns = self.elapsed_ns();
-        let subsecond_ns = elapsed_ns % 1_000_000_000;
-
-        let divisor = 10u64.pow(9 - digits);
-        let subsecond = subsecond_ns / divisor;
-
-        let elapsed_ms = elapsed_ns / 1_000_000;
-        let seconds_total = elapsed_ms / 1000;
-        let seconds = seconds_total % 60;
-        let minutes_total = seconds_total / 60;
-        let minutes = minutes_total % 60;
-        let hours = minutes_total / 60;
-
-        format!(
-            "{:02}:{:02}:{:02}.{:0width$}",
-            hours,
-            minutes,
-            seconds,
-            subsecond,
-            width = digits as usize
-        )
-    }
 }
 
 pub fn preferred_timer_ms() -> u64 {
@@ -87,11 +58,9 @@ pub fn preferred_timer_ns() -> u64 {
             _ => [&None, &None, &None],
         };
 
-        for timer_opt in timers {
-            if let Some(timer) = *timer_opt {
-                if timer.is_supported() {
-                    return timer.elapsed_ns();
-                }
+        for timer in timers.into_iter().flatten() {
+            if timer.is_supported() {
+                return timer.elapsed_ns();
             }
         }
 
@@ -100,25 +69,5 @@ pub fn preferred_timer_ns() -> u64 {
 }
 
 pub fn preferred_timer_pretty(digits: u32) -> String {
-    let elapsed_ns = preferred_timer_ns();
-    let subsecond_ns = elapsed_ns % 1_000_000_000;
-
-    let divisor = 10u64.pow(9 - digits);
-    let subsecond = subsecond_ns / divisor;
-
-    let elapsed_ms = elapsed_ns / 1_000_000;
-    let seconds_total = elapsed_ms / 1000;
-    let seconds = seconds_total % 60;
-    let minutes_total = seconds_total / 60;
-    let minutes = minutes_total % 60;
-    let hours = minutes_total / 60;
-
-    format!(
-        "{:02}:{:02}:{:02}.{:0width$}",
-        hours,
-        minutes,
-        seconds,
-        subsecond,
-        width = digits as usize
-    )
+    crate::utils::time::elapsed_time_pretty(preferred_timer_ns(), digits)
 }

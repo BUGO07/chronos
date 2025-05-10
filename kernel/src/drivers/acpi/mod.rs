@@ -3,9 +3,10 @@
     Released under EUPL 1.2 License
 */
 
-use core::ptr::null_mut;
+#[cfg(target_arch = "x86_64")]
+use crate::memory::vmm::{PAGEMAP, flag, page_size};
+use crate::{debug, device::pci::MCFG_ADDRESS, error, println, utils::limine::get_hhdm_offset};
 
-use crate::{error, println};
 use uacpi_sys::*;
 
 pub mod uacpi;
@@ -35,16 +36,42 @@ pub fn init() {
             panic!("uacpi didn't initialize properly | gpe init - {}", ret);
         }
 
+        let mut table = uacpi_table::default();
+        if uacpi_table_find_by_signature(c"MCFG".as_ptr(), &mut table) != UACPI_STATUS_OK {
+            panic!("couldn't find mcfg table - {}", ret);
+        }
+
+        let mcfg = &mut *(*(table.__bindgen_anon_1.ptr as *mut acpi_mcfg)) // this is how not to use rust
+            .entries
+            .as_mut_ptr();
+
+        let addr = mcfg.address & !0xFFF;
+        let virt = addr + get_hhdm_offset();
+
+        debug!("mapping mcfg: 0x{addr:X} -> 0x{virt:X}");
+
+        #[cfg(target_arch = "x86_64")]
+        for i in (0..(256 * 1024 * 1024)).step_by(page_size::MEDIUM as usize) {
+            PAGEMAP.get_mut().unwrap().lock().map(
+                virt + i,
+                addr + i,
+                flag::RW | flag::USER,
+                page_size::MEDIUM,
+            );
+        }
+
+        MCFG_ADDRESS = virt;
+
         uacpi_install_fixed_event_handler(
             UACPI_FIXED_EVENT_POWER_BUTTON,
             Some(uacpi_powerbtn_handler),
-            null_mut(),
+            core::ptr::null_mut(),
         );
 
         uacpi_install_fixed_event_handler(
             UACPI_FIXED_EVENT_SLEEP_BUTTON,
             Some(uacpi_sleepbtn_handler),
-            null_mut(),
+            core::ptr::null_mut(),
         );
     }
 }

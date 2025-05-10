@@ -9,8 +9,5 @@ pub mod preemptive;
 pub use preemptive::*;
 
 pub mod cooperative;
-pub mod task;
 #[cfg(target_arch = "aarch64")]
 pub use cooperative::*;
-#[cfg(target_arch = "aarch64")]
-pub use task::*;

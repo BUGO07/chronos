@@ -15,21 +15,20 @@ use spin::{Mutex, mutex::SpinMutex};
 use uacpi_sys::*;
 
 use crate::{
-    arch::{
-        device::pci::{
-            PciAddress, pci_config_read_u8, pci_config_read_u16, pci_config_read_u32,
-            pci_config_write_u8, pci_config_write_u16, pci_config_write_u32,
-        },
-        interrupts::StackFrame,
+    debug,
+    device::pci::{
+        PciAddress, pci_config_read_u8, pci_config_read_u16, pci_config_read_u32,
+        pci_config_write_u8, pci_config_write_u16, pci_config_write_u32,
     },
-    debug, error, info,
-    memory::vmm::{PAGEMAP, flag, page_size},
-    utils::{
-        align_down, align_up,
-        asm::port::{inb, inl, inw, outb, outl, outw},
-        limine::get_rsdp_address,
-    },
+    error, info,
+    utils::limine::get_rsdp_address,
     warn,
+};
+
+#[cfg(target_arch = "x86_64")]
+use crate::{
+    memory::vmm::{PAGEMAP, flag, page_size},
+    utils::asm::port::{inb, inl, inw, outb, outl, outw},
 };
 
 #[unsafe(no_mangle)]
@@ -169,96 +168,142 @@ extern "C" fn uacpi_kernel_io_unmap(_handle: uacpi_handle) {}
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_io_read8(
-    handle: uacpi_handle,
-    offset: uacpi_size,
-    value: *mut uacpi_u8,
+    _handle: uacpi_handle,
+    _offset: uacpi_size,
+    _value: *mut uacpi_u8,
 ) -> uacpi_status {
-    unsafe { *value = inb((handle as usize + offset) as u16) };
-    UACPI_STATUS_OK
+    #[cfg(target_arch = "x86_64")]
+    {
+        unsafe { *_value = inb((_handle as usize + _offset) as u16) };
+        UACPI_STATUS_OK
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        UACPI_STATUS_UNIMPLEMENTED
+    }
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_io_read16(
-    handle: uacpi_handle,
-    offset: uacpi_size,
-    value: *mut uacpi_u16,
+    _handle: uacpi_handle,
+    _offset: uacpi_size,
+    _value: *mut uacpi_u16,
 ) -> uacpi_status {
-    unsafe { *value = inw((handle as usize + offset) as u16) };
-    UACPI_STATUS_OK
+    #[cfg(target_arch = "x86_64")]
+    {
+        unsafe { *_value = inw((_handle as usize + _offset) as u16) };
+        UACPI_STATUS_OK
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        UACPI_STATUS_UNIMPLEMENTED
+    }
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_io_read32(
-    handle: uacpi_handle,
-    offset: uacpi_size,
-    value: *mut uacpi_u32,
+    _handle: uacpi_handle,
+    _offset: uacpi_size,
+    _value: *mut uacpi_u32,
 ) -> uacpi_status {
-    unsafe { *value = inl((handle as usize + offset) as u16) };
-    UACPI_STATUS_OK
+    #[cfg(target_arch = "x86_64")]
+    {
+        unsafe { *_value = inl((_handle as usize + _offset) as u16) };
+        UACPI_STATUS_OK
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        UACPI_STATUS_UNIMPLEMENTED
+    }
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_io_write8(
-    handle: uacpi_handle,
-    offset: uacpi_size,
-    value: uacpi_u8,
+    _handle: uacpi_handle,
+    _offset: uacpi_size,
+    _value: uacpi_u8,
 ) -> uacpi_status {
-    outb((handle as usize + offset) as u16, value);
-    UACPI_STATUS_OK
+    #[cfg(target_arch = "x86_64")]
+    {
+        outb((_handle as usize + _offset) as u16, _value);
+        UACPI_STATUS_OK
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        UACPI_STATUS_UNIMPLEMENTED
+    }
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_io_write16(
-    handle: uacpi_handle,
-    offset: uacpi_size,
-    value: uacpi_u16,
+    _handle: uacpi_handle,
+    _offset: uacpi_size,
+    _value: uacpi_u16,
 ) -> uacpi_status {
-    outw((handle as usize + offset) as u16, value);
-    UACPI_STATUS_OK
+    #[cfg(target_arch = "x86_64")]
+    {
+        outw((_handle as usize + _offset) as u16, _value);
+        UACPI_STATUS_OK
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        UACPI_STATUS_UNIMPLEMENTED
+    }
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_io_write32(
-    handle: uacpi_handle,
-    offset: uacpi_size,
-    value: uacpi_u32,
+    _handle: uacpi_handle,
+    _offset: uacpi_size,
+    _value: uacpi_u32,
 ) -> uacpi_status {
-    outl((handle as usize + offset) as u16, value);
-    UACPI_STATUS_OK
+    #[cfg(target_arch = "x86_64")]
+    {
+        outl((_handle as usize + _offset) as u16, _value);
+        UACPI_STATUS_OK
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        UACPI_STATUS_UNIMPLEMENTED
+    }
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn uacpi_kernel_map(addr: uacpi_phys_addr, len: uacpi_size) -> *mut c_void {
-    let psize = page_size::SMALL;
-    let paddr = align_down(addr, psize);
-    let size = align_up((addr - paddr) + len as u64, psize);
+extern "C" fn uacpi_kernel_map(_addr: uacpi_phys_addr, _len: uacpi_size) -> *mut c_void {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let psize = page_size::SMALL;
+        let paddr = crate::utils::align_down(_addr, psize);
+        let size = crate::utils::align_up((_addr - paddr) + _len as u64, psize);
 
-    for i in (0..size).step_by(psize as usize) {
-        unsafe {
-            PAGEMAP.get_mut().unwrap().lock().map(
-                paddr + i,
-                paddr + i,
-                flag::PRESENT | flag::WRITE,
-                psize,
-            )
-        };
+        for i in (0..size).step_by(psize as usize) {
+            unsafe {
+                PAGEMAP
+                    .get_mut()
+                    .unwrap()
+                    .lock()
+                    .map(paddr + i, paddr + i, flag::RW, psize)
+            };
+        }
+        _addr as *mut c_void
     }
-    addr as *mut c_void
+    #[cfg(target_arch = "aarch64")]
+    null_mut()
 }
 
-// no unmap yet
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_unmap(_addr: *mut c_void, _len: uacpi_size) {}
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_alloc(size: uacpi_size) -> *mut c_void {
     unsafe {
-        let layout = Layout::from_size_align(
-            size + core::mem::size_of::<usize>(),
-            core::mem::align_of::<usize>(),
-        )
-        .unwrap();
-        let mem = alloc::alloc::alloc(layout);
+        let mem = alloc::alloc::alloc(
+            Layout::from_size_align(
+                size + core::mem::size_of::<usize>(),
+                core::mem::align_of::<usize>(),
+            )
+            .unwrap(),
+        );
         if mem.is_null() {
             return null_mut();
         }
@@ -287,12 +332,19 @@ extern "C" fn uacpi_kernel_free(mem: *mut c_void) {
 extern "C" fn uacpi_kernel_log(lvl: uacpi_log_level, msg: *const uacpi_char) {
     if !msg.is_null() {
         let message = unsafe { CStr::from_ptr(msg).to_string_lossy().replace("\n", "") };
-        match lvl {
-            UACPI_LOG_DEBUG | UACPI_LOG_TRACE => debug!("{message}"),
-            UACPI_LOG_INFO => info!("{message}"),
-            UACPI_LOG_WARN => warn!("{message}"),
-            UACPI_LOG_ERROR => error!("{message}"),
-            _ => {}
+        #[cfg(not(feature = "uacpi_test"))]
+        {
+            match lvl {
+                UACPI_LOG_DEBUG | UACPI_LOG_TRACE => debug!("{message}"),
+                UACPI_LOG_INFO => info!("{message}"),
+                UACPI_LOG_WARN => warn!("{message}"),
+                UACPI_LOG_ERROR => error!("{message}"),
+                _ => {}
+            }
+        }
+        #[cfg(feature = "uacpi_test")]
+        {
+            crate::serial_println!("[UACPI] {}", message);
         }
     }
 }
@@ -453,11 +505,12 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
     out_irq_handle: *mut uacpi_handle,
 ) -> uacpi_status {
     unsafe {
-        let vector = (irq + 0x20) as u8; // x64
+        let vector = (irq + 0x20) as u8;
 
         UACPI_INTERRUPT_HANDLER_FN = Some(func);
         UACPI_INTERRUPT_CTX = Some(ctx);
 
+        #[cfg(target_arch = "x86_64")]
         crate::arch::interrupts::install_interrupt(vector, handle_uacpi_interrupt);
 
         *(out_irq_handle as *mut usize) = vector as usize;
@@ -465,12 +518,14 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
     }
 }
 
-fn handle_uacpi_interrupt(_stack_frame: *mut StackFrame) {
+#[cfg(target_arch = "x86_64")]
+fn handle_uacpi_interrupt(_stack_frame: *mut crate::arch::interrupts::StackFrame) {
     unsafe {
         if let Some(handler) = UACPI_INTERRUPT_HANDLER_FN {
             handler.unwrap()(UACPI_INTERRUPT_CTX.unwrap());
         }
     }
+    #[cfg(target_arch = "x86_64")]
     crate::arch::interrupts::pic::send_eoi(9);
 }
 
@@ -480,9 +535,10 @@ extern "C" fn uacpi_kernel_uninstall_interrupt_handler(
     irq_handle: uacpi_handle,
 ) -> uacpi_status {
     unsafe {
-        let vector = irq_handle as u8; // x64
+        let _vector = irq_handle as u8;
 
-        crate::arch::interrupts::clear_interrupt(vector);
+        #[cfg(target_arch = "x86_64")]
+        crate::arch::interrupts::clear_interrupt(_vector);
 
         UACPI_INTERRUPT_HANDLER_FN = None;
         UACPI_INTERRUPT_CTX = None;

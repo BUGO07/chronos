@@ -3,36 +3,37 @@
     Released under EUPL 1.2 License
 */
 
-use ps2_mouse::{Mouse, MouseState};
-use spin::Mutex;
+use crate::{
+    arch::interrupts::StackFrame,
+    error, info,
+    utils::asm::port::{inb, outb},
+};
 
-use crate::{arch::interrupts::StackFrame, error, info, utils::asm::port::inb};
+pub static mut MOUSE: Mouse = Mouse::new();
 
-pub static DRIVER: Mutex<Mouse> = Mutex::new(Mouse::new());
-pub static MOUSE: Mutex<MouseInfo> = Mutex::new(MouseInfo::new());
-
-pub struct MouseInfo {
-    x: u16,
-    y: u16,
-    left: bool,
-    right: bool,
-    state: MouseState,
+#[derive(Debug)]
+pub struct Mouse {
+    pub x: u16,
+    pub y: u16,
+    pub left: bool,
+    pub right: bool,
+    pub middle: bool,
 }
 
-impl Default for MouseInfo {
+impl Default for Mouse {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl MouseInfo {
-    pub const fn new() -> MouseInfo {
-        MouseInfo {
-            state: MouseState::new(),
+impl Mouse {
+    pub const fn new() -> Mouse {
+        Mouse {
             x: 0,
             y: 0,
             left: false,
             right: false,
+            middle: false,
         }
     }
 }
@@ -40,55 +41,108 @@ impl MouseInfo {
 pub fn init() {
     crate::utils::asm::without_ints(|| {
         info!("initializing ps/2 mouse...");
+
+        wait_for_write();
+        outb(COMMAND_PORT, 0xA8);
+
+        wait_for_write();
+        outb(COMMAND_PORT, 0x20);
+        wait_for_read();
+        let status = inb(DATA_PORT) | 0x02;
+        wait_for_write();
+        outb(COMMAND_PORT, 0x60);
+        wait_for_write();
+        outb(DATA_PORT, status);
+
+        send_mouse_command(0xF6);
+        expect_ack();
+
+        send_mouse_command(0xF4);
+        expect_ack();
+
+        flush_data_port();
+
         crate::arch::interrupts::install_interrupt(0x2c, mouse_interrupt_handler);
-        if let Err(err) = DRIVER.lock().init() {
-            error!("failed to initialize ps/2 mouse: {}", err);
-        }
-        DRIVER.lock().set_on_complete(on_complete);
-        info!("done");
+        info!("done...");
     });
 }
 
-fn on_complete(mouse_state: MouseState) {
-    let mut mouse = MOUSE.lock();
-    if mouse_state.x_moved() {
-        let x_movement = mouse_state.get_x();
-        if x_movement > 0 {
-            let added = mouse.x as u32 + x_movement.unsigned_abs() as u32;
-            if added <= u16::MAX as u32 {
-                mouse.x += x_movement.unsigned_abs();
-            }
-        } else if x_movement < 0 {
-            let subtracted = mouse.x as i16 - x_movement.abs();
-            if subtracted >= 0 {
-                mouse.x -= x_movement.unsigned_abs();
-            }
+pub fn mouse_interrupt_handler(_stack_frame: *mut StackFrame) {
+    unsafe {
+        let status = inb(STATUS_PORT);
+
+        if (status & 0x20) == 0 {
+            crate::arch::interrupts::pic::send_eoi(12);
+            return;
         }
-    }
 
-    if mouse_state.y_moved() {
-        let y_movement = mouse_state.get_y();
-        if y_movement > 0 {
-            let added = mouse.y as u32 + y_movement.unsigned_abs() as u32;
-            if added <= u16::MAX as u32 {
-                mouse.y += y_movement.unsigned_abs();
-            }
-        } else if y_movement < 0 {
-            let subtracted = mouse.y as i16 - y_movement.abs();
-            if subtracted >= 0 {
-                mouse.y -= y_movement.unsigned_abs();
-            }
+        let byte = inb(DATA_PORT);
+
+        if PACKET_INDEX == 0 && (byte & 0x08) == 0 {
+            PACKET_INDEX = 0;
+            crate::arch::interrupts::pic::send_eoi(12);
+            return;
         }
+
+        MOUSE_PACKET[PACKET_INDEX] = byte;
+        PACKET_INDEX += 1;
+
+        if PACKET_INDEX == 3 {
+            PACKET_INDEX = 0;
+
+            let status_byte = MOUSE_PACKET[0];
+            let dx = MOUSE_PACKET[1] as i8;
+            let dy = MOUSE_PACKET[2] as i8;
+
+            MOUSE.left = (status_byte & 0x01) != 0;
+            MOUSE.right = (status_byte & 0x02) != 0;
+            MOUSE.middle = (status_byte & 0x04) != 0;
+
+            MOUSE.x = ((MOUSE.x as i32 + dx as i32).clamp(0, u16::MAX as i32)) as u16;
+            MOUSE.y = ((MOUSE.y as i32 - dy as i32).clamp(0, u16::MAX as i32)) as u16;
+        }
+        crate::arch::interrupts::pic::send_eoi(12);
     }
-
-    mouse.left = mouse_state.left_button_down();
-
-    mouse.right = mouse_state.right_button_down();
-
-    mouse.state = mouse_state;
 }
 
-pub fn mouse_interrupt_handler(_stack_frame: *mut StackFrame) {
-    DRIVER.lock().process_packet(inb(0x60));
-    crate::arch::interrupts::pic::send_eoi(12);
+const DATA_PORT: u16 = 0x60;
+const STATUS_PORT: u16 = 0x64;
+const COMMAND_PORT: u16 = 0x64;
+
+static mut MOUSE_PACKET: [u8; 3] = [0; 3];
+static mut PACKET_INDEX: usize = 0;
+
+fn send_mouse_command(command: u8) {
+    wait_for_write();
+    outb(COMMAND_PORT, 0xD4);
+    wait_for_write();
+    outb(DATA_PORT, command);
+}
+
+fn expect_ack() {
+    let ack = read_mouse_data();
+    if ack != 0xFA {
+        error!("mouse did not acknowledge (got {:X})", ack);
+    }
+}
+
+fn read_mouse_data() -> u8 {
+    wait_for_read();
+    inb(DATA_PORT)
+}
+
+fn wait_for_read() {
+    while (inb(STATUS_PORT) & 0x01) == 0 {}
+}
+
+fn wait_for_write() {
+    while (inb(STATUS_PORT) & 0x02) != 0 {}
+}
+
+fn flush_data_port() {
+    for _ in 0..10 {
+        if (inb(STATUS_PORT) & 0x01) != 0 {
+            let _ = inb(DATA_PORT);
+        }
+    }
 }

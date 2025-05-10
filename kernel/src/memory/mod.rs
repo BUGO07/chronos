@@ -61,11 +61,8 @@ pub fn init() {
         info!("done");
         MEMORY_INIT_STAGE = 1;
     }
-    #[cfg(target_arch = "x86_64")]
-    {
-        vmm::init();
-        unsafe { MEMORY_INIT_STAGE = 2 };
-    }
+    vmm::init();
+    unsafe { MEMORY_INIT_STAGE = 2 };
 }
 
 pub fn get_memory_init_stage() -> u8 {
