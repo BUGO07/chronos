@@ -52,7 +52,7 @@ pub fn init() {
 }
 
 extern "C" fn cpu_entry(_cpu: &limine::mp::Cpu) -> ! {
-    //TODO: fix this
+    // TODO: fix this
     let mut scheduler = cooperative::Scheduler::new();
     scheduler.run()
 }

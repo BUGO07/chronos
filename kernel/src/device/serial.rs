@@ -5,14 +5,17 @@
 
 use core::fmt::Write;
 
-use crate::utils::asm::port::outb;
-
 pub struct SerialWriter;
 
 impl Write for SerialWriter {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for byte in s.bytes() {
-            outb(0xe9, byte);
+            #[cfg(target_arch = "x86_64")]
+            crate::utils::asm::port::outb(0xe9, byte);
+            #[cfg(target_arch = "aarch64")]
+            unsafe {
+                (0x0900_0000 as *mut u8).write_volatile(byte)
+            };
         }
         Ok(())
     }
@@ -20,15 +23,13 @@ impl Write for SerialWriter {
 
 #[doc(hidden)]
 pub fn _print(args: ::core::fmt::Arguments) {
-    crate::utils::asm::without_ints(|| {
-        write!(SerialWriter, "{args}").ok();
-    });
+    write!(SerialWriter, "{args}").ok();
 }
 
 #[macro_export]
 macro_rules! serial_print {
     ($($arg:tt)*) => {
-        $crate::arch::device::serial::_print(format_args!($($arg)*))
+        $crate::device::serial::_print(format_args!($($arg)*))
     };
 }
 

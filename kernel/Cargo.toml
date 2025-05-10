@@ -31,15 +31,11 @@ lto = "fat"
 [dependencies]
 limine = "0.4"
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
-pc-keyboard = "0.8.0"
-spin = "0.10.0"
-talc = "4.4.2"
+pc-keyboard = "0.8.0" # TODO: my own keyboard types
+spin = "0.10.0" # TODO: my own spinlock
+talc = "4.4.2" # TODO: my own allocator
 uacpi-sys = { path = "../bindings/uacpi-sys" }
 flanterm-sys = { path = "../bindings/flanterm-sys" }
-
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-x86_64 = "0.15.2" # TODO: imlpement gdt and get rid of this
-ps2-mouse = "0.1.4" # TODO: make my own mouse driver
 
 [features]
 # default = ["tests"] # to get intelisense on test files

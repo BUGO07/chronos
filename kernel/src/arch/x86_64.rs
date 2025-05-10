@@ -21,7 +21,6 @@ use crate::{
     },
 };
 
-pub mod device;
 pub mod drivers;
 pub mod gdt;
 pub mod interrupts;
@@ -37,10 +36,43 @@ struct StackTrace {
     rip: usize,
 }
 
-pub fn main_thread() -> ! {
-    crate::arch::device::pci::pci_enumerate();
-    crate::arch::drivers::mouse::init();
+pub fn _start() -> ! {
+    println!("\n{NOOO}\n");
+    info!("x86_64 kernel starting...\n");
 
+    crate::memory::init();
+    self::system::cpu::init_bsp();
+    self::gdt::init();
+    self::interrupts::init();
+    self::interrupts::pic::init();
+    self::interrupts::pic::unmask_all(); // limine masks all IRQs by default // TODO: mask/unmask irqs properly
+
+    crate::utils::asm::toggle_ints(true);
+
+    self::drivers::time::early_init();
+
+    crate::drivers::acpi::init();
+
+    #[cfg(feature = "uacpi_test")]
+    crate::drivers::acpi::shutdown();
+
+    self::drivers::time::init();
+    self::system::cpu::init();
+    self::drivers::mouse::init();
+    crate::device::pci::pci_enumerate();
+
+    #[cfg(feature = "tests")]
+    crate::tests::init();
+
+    scheduler::init_pid0();
+    scheduler::new_thread(
+        unsafe { Arc::clone(scheduler::PID0.get().unwrap()) },
+        main_thread as usize,
+    );
+    scheduler::init();
+}
+
+pub fn main_thread() -> ! {
     println!();
     print_fill!("-");
     println!();
@@ -60,16 +92,13 @@ pub fn main_thread() -> ! {
         info!("display {}: size - {}x{}", i + 1, fb.width(), fb.height());
     }
 
-    // ! icl ts pmo sm its causing sometimes gpf sometimes pagefault on reboot
-    // let config = crate::utils::config::get_config();
-
     let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
         .with_timezone_offset(
             crate::utils::config::get_config()
                 .timezone_offset
                 .to_int()
                 .clamp(-720, 840) as i16,
-        ) // change me
+        )
         .adjusted_for_timezone();
 
     info!(
@@ -103,49 +132,15 @@ pub fn main_thread() -> ! {
 
     scheduler::new_thread(
         unsafe { Arc::clone(scheduler::PID0.get().unwrap()) },
-        keyboard_thread as usize,
-    );
-
-    scheduler::new_thread(
-        unsafe { Arc::clone(scheduler::PID0.get().unwrap()) },
         shell_thread as usize,
     );
 
-    halt_loop()
-}
-
-pub fn _start() -> ! {
-    println!("\n{NOOO}\n");
-    info!("x86_64 kernel starting...\n");
-
-    crate::memory::init();
-    self::system::cpu::init_bsp();
-    self::gdt::init();
-    self::interrupts::init_idt();
-    self::interrupts::pic::init();
-    self::interrupts::pic::unmask_all(); // limine masks all IRQs by default // todo: fix ts
-
-    crate::utils::asm::toggle_ints(true);
-
-    self::drivers::time::early_init();
-
-    self::drivers::acpi::init();
-
-    #[cfg(feature = "uacpi_test")]
-    self::drivers::acpi::shutdown();
-
-    self::drivers::time::init();
-    self::system::cpu::init();
-
-    #[cfg(feature = "tests")]
-    crate::tests::init();
-
-    scheduler::init_pid0();
     scheduler::new_thread(
         unsafe { Arc::clone(scheduler::PID0.get().unwrap()) },
-        main_thread as usize,
+        keyboard_thread as usize,
     );
-    scheduler::init();
+
+    halt_loop()
 }
 
 pub fn _panic(info: &PanicInfo) -> ! {
@@ -153,7 +148,7 @@ pub fn _panic(info: &PanicInfo) -> ! {
     {
         println!("[failed]\n");
         println!("{info}\n");
-        crate::arch::drivers::acpi::shutdown();
+        crate::drivers::acpi::shutdown();
     }
     #[cfg(not(feature = "tests"))]
     {

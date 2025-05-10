@@ -8,10 +8,11 @@ use pc_keyboard::{HandleControl, KeyCode, Keyboard, ScancodeSet1, layouts::Us104
 
 use crate::{arch::interrupts::StackFrame, utils::asm::port::inb};
 
-static mut KEYBOARD_STATE: KeyboardState = KeyboardState {
+pub static mut KEYBOARD_STATE: KeyboardState = KeyboardState {
     scancodes: LinkedList::new(),
     keys_down: Vec::new(),
 };
+
 pub struct KeyboardState {
     pub scancodes: LinkedList<u8>,
     pub keys_down: Vec<KeyCode>,

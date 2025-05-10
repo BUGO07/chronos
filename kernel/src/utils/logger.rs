@@ -23,7 +23,7 @@ pub mod color {
     pub const PURPLE: &str = "\x1b[38;5;91m";
     pub const PINK: &str = "\x1b[38;5;207m";
     pub const CYAN: &str = "\x1b[38;5;51m";
-    pub const WHITE: &str = "\x1b[38;5;7m"; // same as reset i think
+    pub const WHITE: &str = "\x1b[38;5;7m";
     pub const WHITE_BRIGHT: &str = "\x1b[38;5;15m";
 
     pub const BLACK_BG: &str = "\x1b[48;5;16m";

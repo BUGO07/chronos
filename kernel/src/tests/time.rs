@@ -3,10 +3,7 @@
     Released under EUPL 1.2 License
 */
 
-use crate::{
-    arch::drivers::time::{KernelTimer, pit::current_pit_ticks},
-    print,
-};
+use crate::{arch::drivers::time::pit::current_pit_ticks, print, utils::time::KernelTimer};
 
 pub fn pit_timer() {
     let time = current_pit_ticks();

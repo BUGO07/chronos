@@ -6,12 +6,10 @@
 use crate::{
     debug, info,
     memory::vmm::{flag, page_size},
-    utils::limine::get_hhdm_offset,
+    utils::{limine::get_hhdm_offset, time::KernelTimer},
 };
 use core::cell::OnceCell;
 use uacpi_sys::*;
-
-use super::KernelTimer;
 
 pub static mut HPET_TIMER: OnceCell<HpetTimer> = OnceCell::new();
 
@@ -97,12 +95,12 @@ pub fn init() {
     let paddr = unsafe { HPET_ADDRESS };
     let address = paddr + get_hhdm_offset();
 
-    debug!("mapping hpet address: 0x{:X} -> 0x{:X}", paddr, address);
+    debug!("mapping hpet: 0x{:X} -> 0x{:X}", paddr, address);
     unsafe {
         crate::memory::vmm::PAGEMAP.get_mut().unwrap().lock().map(
             paddr + get_hhdm_offset(),
             paddr,
-            flag::PRESENT | flag::WRITE,
+            flag::RW,
             page_size::SMALL,
         )
     };

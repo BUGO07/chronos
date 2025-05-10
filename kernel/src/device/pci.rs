@@ -3,16 +3,15 @@
     Released under EUPL 1.2 License
 */
 
-use core::cell::OnceCell;
-
 use alloc::vec::Vec;
 
-use crate::{
-    info,
-    utils::asm::port::{inl, outl},
-};
+use crate::info;
 
-pub static mut PCI_DEVICES: OnceCell<Vec<PciDevice>> = OnceCell::new();
+#[cfg(target_arch = "x86_64")]
+use crate::utils::asm::port::{inl, outl};
+
+pub static mut PCI_DEVICES: Vec<PciDevice> = Vec::new();
+pub static mut MCFG_ADDRESS: u64 = 0;
 
 #[derive(Debug)]
 pub struct PciDevice {
@@ -32,12 +31,23 @@ pub struct PciAddress {
 }
 
 impl PciAddress {
-    fn config_address(&self, offset: u8) -> u32 {
+    #[cfg(target_arch = "x86_64")]
+    fn io_config_address(&self, offset: u8) -> u32 {
         let bus = self.bus as u32;
         let device = self.device as u32;
         let function = self.function as u32;
         let offset = offset as u32 & 0xFC;
         0x8000_0000 | (bus << 16) | (device << 11) | (function << 8) | offset
+    }
+
+    fn mmio_config_address(&self, offset: u8) -> *mut u32 {
+        let bus = self.bus as u64;
+        let device = self.device as u64;
+        let function = self.function as u64;
+        let offset = (offset as u64) & !0x3;
+        unsafe {
+            (MCFG_ADDRESS + ((bus << 20) | (device << 15) | (function << 12) | offset)) as *mut u32
+        }
     }
 }
 
@@ -52,9 +62,23 @@ pub fn pci_config_read_u16(addr: PciAddress, offset: u8) -> u16 {
 }
 
 pub fn pci_config_read_u32(addr: PciAddress, offset: u8) -> u32 {
-    let address = addr.config_address(offset);
-    outl(0xCF8, address);
-    inl(0xCFC)
+    unsafe {
+        if MCFG_ADDRESS != 0 {
+            core::ptr::read_volatile(addr.mmio_config_address(offset))
+        } else {
+            #[cfg(target_arch = "x86_64")]
+            {
+                let address = addr.io_config_address(offset);
+                outl(0xCF8, address);
+                inl(0xCFC)
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                panic!("PCI access via I/O ports is not supported on AArch64");
+            }
+        }
+    }
 }
 
 pub fn pci_config_write_u8(addr: PciAddress, offset: u8, value: u8) {
@@ -74,14 +98,26 @@ pub fn pci_config_write_u16(addr: PciAddress, offset: u8, value: u16) {
 }
 
 pub fn pci_config_write_u32(addr: PciAddress, offset: u8, value: u32) {
-    let address = addr.config_address(offset);
-    outl(0xCF8, address);
-    outl(0xCFC, value);
+    unsafe {
+        if MCFG_ADDRESS != 0 {
+            core::ptr::write_volatile(addr.mmio_config_address(offset), value);
+        } else {
+            #[cfg(target_arch = "x86_64")]
+            {
+                let address = addr.io_config_address(offset);
+                outl(0xCF8, address);
+                outl(0xCFC, value);
+            }
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                panic!("PCI access via I/O ports is not supported on AArch64");
+            }
+        }
+    }
 }
 
-//TODO: make it faster with mmio
 pub fn pci_enumerate() {
-    let mut devices = Vec::new();
     for bus in 0..=255 {
         for device in 0..32 {
             for function in 0..8 {
@@ -120,18 +156,16 @@ pub fn pci_enumerate() {
                     "Found {device_type} {vendor_id:04X}:{device_id:04X} [0x{class_code:X}:0x{subclass:X}:0x{prog_if:X}]",
                 );
 
-                devices.push(PciDevice {
-                    address: PciAddress {
-                        bus,
-                        device,
-                        function,
-                    },
-                    vendor_id,
-                    device_id,
-                    class_code,
-                    subclass,
-                    prog_if,
-                });
+                unsafe {
+                    PCI_DEVICES.push(PciDevice {
+                        address: pciaddr,
+                        vendor_id,
+                        device_id,
+                        class_code,
+                        subclass,
+                        prog_if,
+                    })
+                };
 
                 if function == 0 && ((pci_config_read_u32(pciaddr, 0x0C) >> 16) & 0x80) == 0 {
                     break;
@@ -139,5 +173,4 @@ pub fn pci_enumerate() {
             }
         }
     }
-    unsafe { PCI_DEVICES.set(devices).unwrap() };
 }

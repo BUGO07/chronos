@@ -3,4 +3,4 @@
     Released under EUPL 1.2 License
 */
 
-pub mod serial;
+pub mod acpi;

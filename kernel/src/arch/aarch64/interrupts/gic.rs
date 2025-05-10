@@ -3,6 +3,5 @@
     Released under EUPL 1.2 License
 */
 
-pub mod keyboard;
-pub mod mouse;
-pub mod time;
+// TODO
+pub fn init() {}

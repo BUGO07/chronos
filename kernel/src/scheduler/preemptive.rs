@@ -8,6 +8,7 @@ use core::{
     arch::asm,
     cell::OnceCell,
     ffi::c_void,
+    mem::size_of,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -24,10 +25,7 @@ use crate::{
         STACK_SIZE,
         vmm::{PAGEMAP, Pagemap},
     },
-    utils::asm::{
-        halt_loop,
-        regs::{get_cs_reg, get_ss_reg},
-    },
+    utils::asm::{halt_loop, mem::memcpy},
 };
 
 static NEXT_PID: AtomicU64 = AtomicU64::new(0);
@@ -85,11 +83,25 @@ impl Thread {
             _tid: proc.lock().next_tid(),
             _kstack,
             regs: StackFrame {
+                #[cfg(target_arch = "x86_64")]
                 rsp: _kstack + STACK_SIZE as u64,
+                #[cfg(target_arch = "x86_64")]
                 rip: func,
-                cs: get_cs_reg() as u64,
-                ss: get_ss_reg() as u64,
+                #[cfg(target_arch = "x86_64")]
+                cs: crate::utils::asm::regs::get_cs_reg() as u64,
+                #[cfg(target_arch = "x86_64")]
+                ss: crate::utils::asm::regs::get_ss_reg() as u64,
+                #[cfg(target_arch = "x86_64")]
                 rflags: 0x202,
+
+                // TODO
+                #[cfg(target_arch = "aarch64")]
+                sp: _kstack + STACK_SIZE as u64,
+                #[cfg(target_arch = "aarch64")]
+                pc: func,
+                #[cfg(target_arch = "aarch64")]
+                pstate: 0,
+
                 ..Default::default()
             },
             _parent: Arc::downgrade(&proc),
@@ -100,7 +112,7 @@ impl Thread {
 pub fn schedule(regs: *mut StackFrame) {
     let next = next_thread();
     if let Some(ct) = unsafe { CURRENT_THREAD.clone() } {
-        crate::utils::asm::mem::memcpy(
+        memcpy(
             &raw mut ct.lock().regs as *mut c_void,
             regs as *mut c_void,
             size_of::<StackFrame>(),
@@ -113,7 +125,7 @@ pub fn schedule(regs: *mut StackFrame) {
 
         unsafe { CURRENT_THREAD = Some(Arc::clone(&n)) };
 
-        crate::utils::asm::mem::memcpy(
+        memcpy(
             regs as *mut c_void,
             &raw const n.lock().regs as *const c_void,
             size_of::<StackFrame>(),
@@ -137,9 +149,9 @@ pub fn init_pid0() {
         PID0.set(Arc::new(Mutex::new(Process::new(Arc::clone(
             PAGEMAP.get().unwrap(),
         )))))
-        .ok()
-    };
-    unsafe { PROCESSES.push(Arc::clone(PID0.get().unwrap())) };
+        .ok();
+        PROCESSES.push(Arc::clone(PID0.get().unwrap()));
+    }
 }
 
 pub fn new_thread(proc: Arc<Mutex<Process>>, func: usize) {
@@ -149,6 +161,12 @@ pub fn new_thread(proc: Arc<Mutex<Process>>, func: usize) {
 }
 
 pub fn init() -> ! {
-    unsafe { asm!("int $0xFF") };
+    unsafe {
+        #[cfg(target_arch = "x86_64")]
+        asm!("int $0xFF");
+        #[cfg(target_arch = "aarch64")]
+        asm!("svc #0");
+    }
+
     halt_loop();
 }

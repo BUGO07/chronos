@@ -3,17 +3,176 @@
     Released under EUPL 1.2 License
 */
 
-use x86_64::{
-    VirtAddr,
-    instructions::tables::load_tss,
-    registers::segmentation::{CS, DS, ES, FS, GS, SS, Segment},
-    structures::{
-        gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
-        tss::TaskStateSegment,
+use crate::{
+    debug, info,
+    utils::asm::regs::{
+        load_gdt, load_tss, set_cs_reg, set_ds_reg, set_es_reg, set_fs_reg, set_gs_reg, set_ss_reg,
     },
 };
 
-use crate::{debug, info};
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+pub struct SegmentSelector(pub u16);
+
+impl SegmentSelector {
+    pub const fn new(index: u16, table_indicator: u8) -> Self {
+        SegmentSelector((index << 3) | ((table_indicator as u16) << 2))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+pub struct GdtPtr {
+    limit: u16,
+    base: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+pub struct GdtEntry {
+    limit_low: u16,
+    base_low: u16,
+    base_middle: u8,
+    access: u8,
+    granularity: u8,
+    base_high: u8,
+}
+
+impl GdtEntry {
+    const fn missing() -> Self {
+        GdtEntry {
+            limit_low: 0,
+            base_low: 0,
+            base_middle: 0,
+            access: 0,
+            granularity: 0,
+            base_high: 0,
+        }
+    }
+
+    const fn kernel_code_segment() -> Self {
+        const ACCESS_KERNEL_CODE: u8 = 0b1001_1010;
+        const GRANULARITY_4KB: u8 = 0b0010_0000;
+
+        GdtEntry {
+            limit_low: 0,
+            base_low: 0,
+            base_middle: 0,
+            access: ACCESS_KERNEL_CODE,
+            granularity: GRANULARITY_4KB,
+            base_high: 0,
+        }
+    }
+
+    const fn kernel_data_segment() -> Self {
+        const ACCESS_KERNEL_DATA: u8 = 0b1001_0010;
+        const GRANULARITY_4KB: u8 = 0b0000_0000;
+
+        GdtEntry {
+            limit_low: 0,
+            base_low: 0,
+            base_middle: 0,
+            access: ACCESS_KERNEL_DATA,
+            granularity: GRANULARITY_4KB,
+            base_high: 0,
+        }
+    }
+
+    fn tss_segment(tss: &'static TaskStateSegment) -> Self {
+        let base = &raw const *tss as u64;
+        let limit = size_of::<TaskStateSegment>() as u32 - 1;
+        const ACCESS_TSS: u8 = 0b1000_1001;
+        const GRANULARITY_TSS: u8 = 0b0000_0000;
+
+        GdtEntry {
+            limit_low: limit as u16,
+            base_low: base as u16,
+            base_middle: (base >> 16) as u8,
+            access: ACCESS_TSS,
+            granularity: GRANULARITY_TSS,
+            base_high: (base >> 24) as u8,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+pub struct GlobalDescriptorTable {
+    null: GdtEntry,
+    kernel_code: GdtEntry,
+    kernel_data: GdtEntry,
+    tss_low: GdtEntry,
+    tss_high: GdtEntry,
+}
+
+impl Default for GlobalDescriptorTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GlobalDescriptorTable {
+    pub const fn new() -> Self {
+        GlobalDescriptorTable {
+            null: GdtEntry::missing(),
+            kernel_code: GdtEntry::kernel_code_segment(),
+            kernel_data: GdtEntry::kernel_data_segment(),
+            tss_low: GdtEntry::missing(),
+            tss_high: GdtEntry::missing(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+#[repr(C, packed)]
+pub struct TaskStateSegment {
+    reserved0: u32,
+    rsp0: u64,
+    rsp1: u64,
+    rsp2: u64,
+    reserved1: u64,
+    ist1: u64,
+    ist2: u64,
+    ist3: u64,
+    ist4: u64,
+    ist5: u64,
+    ist6: u64,
+    ist7: u64,
+    reserved2: u64,
+    reserved3: u16,
+    io_map_base_address: u16,
+    interrupt_stack_table: [u64; 7],
+}
+
+lazy_static::lazy_static! {
+    static ref TSS: TaskStateSegment = {
+        let mut tss = TaskStateSegment::default();
+        tss.interrupt_stack_table[0] = {
+            let stack_start = &raw const crate::memory::STACK as u64;
+            stack_start + crate::memory::STACK_SIZE as u64
+        };
+        tss
+    };
+
+    static ref GDT: GlobalDescriptorTable = {
+        let mut gdt = GlobalDescriptorTable::new();
+        gdt.tss_low = GdtEntry::tss_segment(&TSS);
+        gdt
+    };
+
+    static ref GDT_PTR: GdtPtr = GdtPtr {
+        limit: (size_of::<GlobalDescriptorTable>() - 1) as u16,
+        base: &raw const *GDT as u64,
+    };
+
+    static ref SELECTORS: Selectors = {
+        Selectors {
+            code_selector: SegmentSelector::new(1, 0),
+            data_selector: SegmentSelector::new(2, 0),
+            tss_selector: SegmentSelector::new(3, 0),
+        }
+    };
+}
 
 struct Selectors {
     code_selector: SegmentSelector,
@@ -21,49 +180,20 @@ struct Selectors {
     tss_selector: SegmentSelector,
 }
 
-lazy_static::lazy_static! {
-    static ref GDT: (GlobalDescriptorTable, Selectors) = {
-        let mut gdt = GlobalDescriptorTable::new();
-        let code_selector = gdt.append(Descriptor::kernel_code_segment());
-        let data_selector = gdt.append(Descriptor::kernel_data_segment());
-        let tss_selector = gdt.append(Descriptor::tss_segment(&TSS));
-        (
-            gdt,
-            Selectors {
-                code_selector,
-                data_selector,
-                tss_selector,
-            },
-        )
-    };
-
-    static ref TSS: TaskStateSegment = {
-        let mut tss = TaskStateSegment::new();
-        tss.interrupt_stack_table[0] = {
-
-            let stack_start = VirtAddr::from_ptr(&raw const crate::memory::STACK);
-            stack_start + crate::memory::STACK_SIZE as u64 // stack_end
-        };
-        tss
-    };
-}
-
 pub fn init() {
     info!("loading gdt");
-    GDT.0.load();
-    unsafe {
-        debug!("loading code segment");
-        CS::set_reg(GDT.1.code_selector);
+    load_gdt(&GDT_PTR);
+    debug!("loading code segment");
+    set_cs_reg(SELECTORS.code_selector.0);
 
-        debug!("loading tss");
-        load_tss(GDT.1.tss_selector);
+    debug!("loading tss");
+    load_tss(SELECTORS.tss_selector.0);
 
-        debug!("loading data segments");
-        SS::set_reg(GDT.1.data_selector);
-        FS::set_reg(GDT.1.data_selector);
-        GS::set_reg(GDT.1.data_selector);
-        // unused in 64 bit but just in case i decide to go to 32
-        DS::set_reg(GDT.1.data_selector);
-        ES::set_reg(GDT.1.data_selector);
-    }
+    debug!("loading data segments");
+    let data = SELECTORS.data_selector.0;
+    set_ds_reg(data);
+    set_es_reg(data);
+    set_fs_reg(data);
+    set_gs_reg(data);
+    set_ss_reg(data);
 }

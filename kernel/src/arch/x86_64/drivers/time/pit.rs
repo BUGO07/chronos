@@ -5,7 +5,7 @@
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use alloc::{format, string::String};
+use alloc::string::String;
 
 use crate::{
     arch::interrupts::StackFrame,
@@ -30,27 +30,7 @@ pub fn timer_interrupt_handler(_stack_frame: *mut StackFrame) {
 }
 
 pub fn elapsed_pretty(digits: u32) -> String {
-    let elapsed_ns = current_pit_ticks() * 1_000_000;
-    let subsecond_ns = elapsed_ns % 1_000_000_000;
-
-    let divisor = 10u64.pow(9 - digits);
-    let subsecond = subsecond_ns / divisor;
-
-    let elapsed_ms = elapsed_ns / 1_000_000;
-    let seconds_total = elapsed_ms / 1000;
-    let seconds = seconds_total % 60;
-    let minutes_total = seconds_total / 60;
-    let minutes = minutes_total % 60;
-    let hours = minutes_total / 60;
-
-    format!(
-        "{:02}:{:02}:{:02}.{:0width$}",
-        hours,
-        minutes,
-        seconds,
-        subsecond,
-        width = digits as usize
-    )
+    crate::utils::time::elapsed_time_pretty(current_pit_ticks() * 1_000_000, digits)
 }
 
 pub fn pit_tick() {

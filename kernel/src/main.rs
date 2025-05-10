@@ -5,9 +5,8 @@
 
 #![no_std]
 #![no_main]
-#![feature(abi_x86_interrupt)]
-#![allow(static_mut_refs)]
 #![allow(
+    static_mut_refs,
     clippy::new_ret_no_self,
     clippy::missing_safety_doc,
     clippy::single_match,
@@ -27,6 +26,8 @@ use core::panic::PanicInfo;
 pub const NOOO: &str = include_str!("../res/nooo.txt");
 
 pub mod arch;
+pub mod device;
+pub mod drivers;
 pub mod memory;
 pub mod scheduler;
 pub mod utils;

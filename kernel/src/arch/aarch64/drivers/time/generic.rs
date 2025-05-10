@@ -7,10 +7,11 @@ use core::cell::OnceCell;
 
 use crate::{
     info,
-    utils::asm::regs::{get_cntfrq, get_cntpct},
+    utils::{
+        asm::regs::{get_cntfrq, get_cntpct},
+        time::KernelTimer,
+    },
 };
-
-use super::KernelTimer;
 
 pub static mut GENERIC_TIMER: OnceCell<GenericTimer> = OnceCell::new();
 

@@ -5,9 +5,12 @@
 
 use core::{cell::OnceCell, sync::atomic::Ordering};
 
-use crate::{debug, info, utils::asm::_rdtsc};
+use crate::{
+    debug, info,
+    utils::{asm::_rdtsc, time::KernelTimer},
+};
 
-use super::{KernelTimer, pit::current_pit_ticks};
+use super::pit::current_pit_ticks;
 
 pub static mut TSC_TIMER: OnceCell<TscTimer> = OnceCell::new();
 

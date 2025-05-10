@@ -33,11 +33,11 @@ Contributors are welcome.
 
 ## TODO:
 
-- Preemptive Scheduler (aarch64)
+- Utilize all cpus
 - VFS
 - USB
 - Userspace
-- Expand aarch64 support
+- Interrupts, MMU and preemptive scheduler on aarch64
 
 ## Known Bugs/Issues
 
@@ -55,7 +55,7 @@ Make sure you have the following installed:
 * QEMU x86_64 | aarch64
 * Xorriso
 
-You will also need `aarch64-linux-gnu-gcc` to build for cross-compile c libraries
+You will also need `aarch64-linux-gnu-gcc` to cross-compile c libraries
 
 Follow these steps to build and run the os
 1. Clone this repo with:\

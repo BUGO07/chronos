@@ -12,10 +12,9 @@ use crate::{
     utils::{
         asm::{_cpuid, _rdtsc, regs::wrmsr},
         limine::get_hhdm_offset,
+        time::KernelTimer,
     },
 };
-
-use super::KernelTimer;
 
 pub static mut KVM_TIMER: OnceCell<KvmTimer> = OnceCell::new();
 
