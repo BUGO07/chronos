@@ -118,59 +118,75 @@ pub fn pci_config_write_u32(addr: PciAddress, offset: u8, value: u32) {
 }
 
 pub fn pci_enumerate() {
-    for bus in 0..=255 {
-        for device in 0..32 {
-            for function in 0..8 {
-                let pciaddr = PciAddress {
-                    bus,
-                    device,
-                    function,
-                };
-                let vendor_device = pci_config_read_u32(pciaddr, 0x00);
-                if vendor_device == 0xFFFF_FFFF {
-                    continue;
-                }
+    enumerate_bus(0);
+}
 
-                let vendor_id = (vendor_device & 0xFFFF) as u16;
-                let device_id = ((vendor_device >> 16) & 0xFFFF) as u16;
+fn enumerate_bus(bus: u8) {
+    for device in 0..32 {
+        enumerate_device(bus, device);
+    }
+}
 
-                let class_info = pci_config_read_u32(pciaddr, 0x08);
-                let class_code = ((class_info >> 24) & 0xFF) as u8;
-                let subclass = ((class_info >> 16) & 0xFF) as u8;
-                let prog_if = ((class_info >> 8) & 0xFF) as u8;
+fn enumerate_device(bus: u8, device: u8) {
+    for function in 0..8 {
+        let pciaddr = PciAddress {
+            bus,
+            device,
+            function,
+        };
 
-                let device_type = match (class_code, subclass, prog_if) {
-                    (0x01, 0x06, 0x01) => "AHCI storage controller",
-                    (0x01, 0x08, 0x02) => "NVMe storage device",
-                    (0x01, 0x01, _) => "IDE storage controller",
-                    (0x02, 0x00, _) => "Ethernet controller",
-                    (0x03, 0x00, _) => "VGA-compatible device",
-                    (0x03, 0x80, _) => "Other display device",
-                    (0x04, 0x03, _) => "Audio device",
-                    (0x06, _, _) => "Bridge device",
-                    (0x0C, 0x03, _) => "USB Controller",
-                    _ => "PCI device",
-                };
-
-                info!(
-                    "Found {device_type} {vendor_id:04X}:{device_id:04X} [0x{class_code:X}:0x{subclass:X}:0x{prog_if:X}]",
-                );
-
-                unsafe {
-                    PCI_DEVICES.push(PciDevice {
-                        address: pciaddr,
-                        vendor_id,
-                        device_id,
-                        class_code,
-                        subclass,
-                        prog_if,
-                    })
-                };
-
-                if function == 0 && ((pci_config_read_u32(pciaddr, 0x0C) >> 16) & 0x80) == 0 {
-                    break;
-                }
+        let vendor_device = pci_config_read_u32(pciaddr, 0x00);
+        if vendor_device == 0xFFFF_FFFF {
+            if function == 0 {
+                return;
+            } else {
+                continue;
             }
+        }
+
+        let vendor_id = (vendor_device & 0xFFFF) as u16;
+        let device_id = ((vendor_device >> 16) & 0xFFFF) as u16;
+
+        let class_info = pci_config_read_u32(pciaddr, 0x08);
+        let class_code = ((class_info >> 24) & 0xFF) as u8;
+        let subclass = ((class_info >> 16) & 0xFF) as u8;
+        let prog_if = ((class_info >> 8) & 0xFF) as u8;
+
+        let device_type = match (class_code, subclass, prog_if) {
+            (0x01, 0x06, 0x01) => "AHCI storage controller",
+            (0x01, 0x08, 0x02) => "NVMe storage device",
+            (0x01, 0x01, _) => "IDE storage controller",
+            (0x02, 0x00, _) => "Ethernet controller",
+            (0x03, 0x00, _) => "VGA-compatible device",
+            (0x03, 0x80, _) => "Other display device",
+            (0x04, 0x03, _) => "Audio device",
+            (0x06, _, _) => "Bridge device",
+            (0x0C, 0x03, _) => "USB Controller",
+            _ => "PCI device",
+        };
+
+        info!(
+            "Found {device_type} {vendor_id:04X}:{device_id:04X} [0x{class_code:X}:0x{subclass:X}:0x{prog_if:X}]",
+        );
+
+        unsafe {
+            PCI_DEVICES.push(PciDevice {
+                address: pciaddr,
+                vendor_id,
+                device_id,
+                class_code,
+                subclass,
+                prog_if,
+            });
+        }
+
+        if class_code == 0x06 && subclass == 0x04 {
+            let secondary_bus = (pci_config_read_u32(pciaddr, 0x18) >> 8) as u8;
+            enumerate_bus(secondary_bus);
+        }
+
+        if function == 0 && ((pci_config_read_u32(pciaddr, 0x0C) >> 16) & 0x80) == 0 {
+            break;
         }
     }
 }

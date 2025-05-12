@@ -33,6 +33,7 @@ pub fn init() {
     TIMERS_INIT_STATE.store(5, Ordering::Relaxed);
 }
 
+#[inline(always)]
 pub fn preferred_timer_ms() -> u64 {
     preferred_timer_ns() / 1_000_000
 }
@@ -68,6 +69,7 @@ pub fn preferred_timer_ns() -> u64 {
     }
 }
 
+#[inline(always)]
 pub fn preferred_timer_pretty(digits: u32) -> String {
     crate::utils::time::elapsed_time_pretty(preferred_timer_ns(), digits)
 }

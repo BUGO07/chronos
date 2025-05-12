@@ -10,8 +10,6 @@ use crate::{
     utils::{asm::_rdtsc, time::KernelTimer},
 };
 
-use super::pit::current_pit_ticks;
-
 pub static mut TSC_TIMER: OnceCell<TscTimer> = OnceCell::new();
 
 pub struct TscTimer {
@@ -68,12 +66,12 @@ pub fn measure_cpu_frequency() -> u64 {
 
     for _ in 0..3 {
         let start_cycles = _rdtsc();
-        let start_ticks = current_pit_ticks();
+        let start_ticks = super::preferred_timer_ms();
 
-        while start_ticks + 50 > current_pit_ticks() {}
+        crate::utils::time::busywait_ms(50);
 
         let end_cycles = _rdtsc();
-        let end_ticks = current_pit_ticks();
+        let end_ticks = super::preferred_timer_ms();
 
         let elapsed_ticks = end_ticks - start_ticks;
         let elapsed_cycles = end_cycles - start_cycles;

@@ -356,14 +356,12 @@ extern "C" fn uacpi_kernel_get_nanoseconds_since_boot() -> uacpi_u64 {
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_stall(usec: uacpi_u8) {
-    let time = crate::arch::drivers::time::preferred_timer_ns();
-    while crate::arch::drivers::time::preferred_timer_ns() < time + (usec as u64) * 1000 {}
+    crate::utils::time::busywait_ns(usec as u64 * 1000);
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_sleep(msec: uacpi_u64) {
-    let time = crate::arch::drivers::time::preferred_timer_ms();
-    while time + msec > crate::arch::drivers::time::preferred_timer_ms() {}
+    crate::utils::time::busywait_ms(msec);
 }
 
 #[unsafe(no_mangle)]

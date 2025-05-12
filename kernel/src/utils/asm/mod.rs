@@ -5,10 +5,12 @@
 
 use core::arch::asm;
 
-pub mod mem;
+use alloc::string::String;
+
 #[cfg(target_arch = "x86_64")]
 pub mod port;
 
+pub mod mem;
 pub mod mmio;
 pub mod regs;
 
@@ -143,11 +145,50 @@ pub fn _rdtsc() -> u64 {
     ((high as u64) << 32) | (low as u64)
 }
 
-#[inline(always)]
-pub fn delay() {
-    for _ in 0..5 {
+pub fn get_cpu() -> String {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let part1 = _cpuid(0x80000002);
+        let part2 = _cpuid(0x80000003);
+        let part3 = _cpuid(0x80000004);
+
+        let brand_raw = [
+            part1.eax, part1.ebx, part1.ecx, part1.edx, part2.eax, part2.ebx, part2.ecx, part2.edx,
+            part3.eax, part3.ebx, part3.ecx, part3.edx,
+        ];
+
+        String::from(
+            brand_raw
+                .iter()
+                .flat_map(|reg| reg.to_le_bytes())
+                .map(|b| b as char)
+                .collect::<String>()
+                .trim(),
+        )
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        let midr: u64;
         unsafe {
-            asm!("nop", options(nomem, nostack, preserves_flags));
+            core::arch::asm!("mrs {0}, MIDR_EL1", out(reg) midr);
         }
+        let implementer = ((midr >> 24) & 0xFF) as u8;
+        let variant = ((midr >> 20) & 0xF) as u8;
+        let architecture = ((midr >> 16) & 0xF) as u8;
+        let part_num = ((midr >> 4) & 0xFFF) as u16;
+        let revision = (midr & 0xF) as u8;
+
+        alloc::format!(
+            "{} V{revision} [variant - {variant}, arch - 0x{architecture:X}]",
+            match (implementer, part_num) {
+                (0x41, 0xD03) => "ARM Cortex-A53",
+                (0x41, 0xD07) => "ARM Cortex-A57",
+                (0x41, 0xD08) => "ARM Cortex-A72",
+                (0x41, 0xD09) => "ARM Cortex-A73",
+                (0x41, 0xD0A) => "ARM Cortex-A75",
+                // do we really gaf?
+                _ => "Unknown CPU",
+            }
+        )
     }
 }

@@ -81,7 +81,9 @@ pub fn read_rtc() -> RtcTime {
     while {
         outb(address_port, 0x0A);
         inb(data_port) & 0x80 != 0
-    } {}
+    } {
+        core::hint::spin_loop();
+    }
 
     let mut second = read_cmos_register(address_port, data_port, 0x00);
     let mut minute = read_cmos_register(address_port, data_port, 0x02);

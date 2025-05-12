@@ -3,7 +3,7 @@
     Released under EUPL 1.2 License
 */
 
-use alloc::{string::ToString, sync::Arc, vec::Vec};
+use alloc::{string::ToString, vec::Vec};
 use core::{
     panic::PanicInfo,
     sync::atomic::{AtomicU64, Ordering},
@@ -66,7 +66,7 @@ pub fn _start() -> ! {
 
     scheduler::init_pid0();
     scheduler::new_thread(
-        unsafe { Arc::clone(scheduler::PID0.get().unwrap()) },
+        unsafe { scheduler::PID0.get().unwrap() },
         main_thread as usize,
     );
     scheduler::init();
@@ -107,7 +107,7 @@ pub fn main_thread() -> ! {
         rtc_time.timezone_pretty()
     );
 
-    info!("rocking a {}", crate::arch::system::cpuid::get_cpu());
+    info!("rocking a(n) {}", crate::utils::asm::get_cpu());
     let cpu_freq = CPU_FREQ.load(Ordering::Relaxed);
     info!(
         "cpu frequency - {}.{:03}GHz",
@@ -131,12 +131,12 @@ pub fn main_thread() -> ! {
     info!("icl ts pmo ♥");
 
     scheduler::new_thread(
-        unsafe { Arc::clone(scheduler::PID0.get().unwrap()) },
+        unsafe { scheduler::PID0.get().unwrap() },
         shell_thread as usize,
     );
 
     scheduler::new_thread(
-        unsafe { Arc::clone(scheduler::PID0.get().unwrap()) },
+        unsafe { scheduler::PID0.get().unwrap() },
         keyboard_thread as usize,
     );
 
