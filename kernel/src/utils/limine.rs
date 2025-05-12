@@ -56,7 +56,10 @@ pub static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
 pub static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
 
 pub fn get_framebuffers() -> impl Iterator<Item = Framebuffer<'static>> {
-    FRAMEBUFFER_REQUEST.get_response().unwrap().framebuffers()
+    FRAMEBUFFER_REQUEST
+        .get_response()
+        .into_iter()
+        .flat_map(|x| x.framebuffers())
 }
 
 pub fn get_memory_map() -> &'static [&'static Entry] {
@@ -80,7 +83,7 @@ pub fn get_mp_response() -> &'static mut MpResponse {
 }
 
 pub fn get_rsdp_address() -> usize {
-    RSDP_REQUEST.get_response().unwrap().address()
+    RSDP_REQUEST.get_response().unwrap().address() - get_hhdm_offset() as usize // without this it crashes in BIOS
 }
 
 pub fn get_bootloader_info() -> &'static BootloaderInfoResponse {

@@ -4,7 +4,7 @@
 */
 
 use crate::{
-    arch::{drivers::time::pit::current_pit_ticks, interrupts::StackFrame},
+    arch::interrupts::StackFrame,
     debug, info,
     memory::vmm::{flag, page_size},
     utils::{
@@ -44,17 +44,14 @@ pub fn init() {
 
     debug!("mapping mmio: 0x{:X} -> 0x{:X}", phys_mmio, mmio);
 
-    let psize = page_size::SMALL;
-
-    let success = unsafe {
-        crate::memory::vmm::PAGEMAP
-            .get_mut()
-            .unwrap()
-            .lock()
-            .map(mmio, phys_mmio, flag::RW, psize)
-    };
-
-    if !success {
+    if unsafe {
+        !crate::memory::vmm::PAGEMAP.get_mut().unwrap().lock().map(
+            mmio,
+            phys_mmio,
+            flag::RW,
+            page_size::SMALL,
+        )
+    } {
         panic!("could not map lapic mmio");
     }
 
@@ -95,13 +92,14 @@ fn calibrate_timer() {
 
     for _ in 0..times {
         mmio_write(reg::TIC, 0xFFFFFFFF);
-        let target = current_pit_ticks() + millis;
-        while current_pit_ticks() < target {}
+
+        crate::utils::time::busywait_ms(millis);
+
         let count = mmio_read(reg::TCC);
         mmio_write(reg::TIC, 0);
 
         let elapsed = 0xFFFFFFFFu64 - count as u64;
-        freq_total += elapsed * 100;
+        freq_total += elapsed * 1000 / millis;
     }
 
     let avg = freq_total / times;

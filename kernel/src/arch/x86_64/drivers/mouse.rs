@@ -132,11 +132,15 @@ fn read_mouse_data() -> u8 {
 }
 
 fn wait_for_read() {
-    while (inb(STATUS_PORT) & 0x01) == 0 {}
+    while (inb(STATUS_PORT) & 0x01) == 0 {
+        core::hint::spin_loop();
+    }
 }
 
 fn wait_for_write() {
-    while (inb(STATUS_PORT) & 0x02) != 0 {}
+    while (inb(STATUS_PORT) & 0x02) != 0 {
+        core::hint::spin_loop();
+    }
 }
 
 fn flush_data_port() {

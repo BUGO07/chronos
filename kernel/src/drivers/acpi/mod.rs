@@ -37,30 +37,28 @@ pub fn init() {
         }
 
         let mut table = uacpi_table::default();
-        if uacpi_table_find_by_signature(c"MCFG".as_ptr(), &mut table) != UACPI_STATUS_OK {
-            panic!("couldn't find mcfg table - {}", ret);
+        if uacpi_table_find_by_signature(c"MCFG".as_ptr(), &mut table) == UACPI_STATUS_OK {
+            let mcfg = &mut *(*(table.__bindgen_anon_1.ptr as *mut acpi_mcfg)) // this is how not to use rust
+                .entries
+                .as_mut_ptr();
+
+            let addr = mcfg.address & !0xFFF;
+            let virt = addr + get_hhdm_offset();
+
+            debug!("mapping mcfg: 0x{addr:X} -> 0x{virt:X}");
+
+            #[cfg(target_arch = "x86_64")]
+            for i in (0..(256 * 1024 * 1024)).step_by(page_size::MEDIUM as usize) {
+                PAGEMAP.get_mut().unwrap().lock().map(
+                    virt + i,
+                    addr + i,
+                    flag::RW | flag::USER,
+                    page_size::MEDIUM,
+                );
+            }
+
+            MCFG_ADDRESS = virt;
         }
-
-        let mcfg = &mut *(*(table.__bindgen_anon_1.ptr as *mut acpi_mcfg)) // this is how not to use rust
-            .entries
-            .as_mut_ptr();
-
-        let addr = mcfg.address & !0xFFF;
-        let virt = addr + get_hhdm_offset();
-
-        debug!("mapping mcfg: 0x{addr:X} -> 0x{virt:X}");
-
-        #[cfg(target_arch = "x86_64")]
-        for i in (0..(256 * 1024 * 1024)).step_by(page_size::MEDIUM as usize) {
-            PAGEMAP.get_mut().unwrap().lock().map(
-                virt + i,
-                addr + i,
-                flag::RW | flag::USER,
-                page_size::MEDIUM,
-            );
-        }
-
-        MCFG_ADDRESS = virt;
 
         uacpi_install_fixed_event_handler(
             UACPI_FIXED_EVENT_POWER_BUTTON,

@@ -29,3 +29,18 @@ pub fn many_boxes() {
     }
     assert_eq!(*long_lived, 1);
 }
+
+// stole it from someone in discord
+pub fn malloc_test() {
+    for i in 0..5000 {
+        unsafe {
+            let osize = 500000;
+            let mut x =
+                alloc::alloc::alloc(alloc::alloc::Layout::from_size_align(osize, 16).unwrap())
+                    as *mut u8;
+            for i in 0..osize {
+                *x.cast::<usize>().add(i) = 2;
+            }
+        }
+    }
+}

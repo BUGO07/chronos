@@ -13,7 +13,7 @@ use core::{
 };
 
 use alloc::{
-    collections::linked_list::LinkedList,
+    collections::vec_deque::VecDeque,
     sync::{Arc, Weak},
     vec::Vec,
 };
@@ -28,8 +28,10 @@ use crate::{
     utils::asm::{halt_loop, mem::memcpy},
 };
 
+pub static mut PID0: OnceCell<Arc<Mutex<Process>>> = OnceCell::new();
+
 static NEXT_PID: AtomicU64 = AtomicU64::new(0);
-static mut QUEUE: LinkedList<Arc<Mutex<Thread>>> = LinkedList::new();
+static mut QUEUE: VecDeque<Arc<Mutex<Thread>>> = VecDeque::new();
 static mut PROCESSES: Vec<Arc<Mutex<Process>>> = Vec::new();
 static mut CURRENT_THREAD: Option<Arc<Mutex<Thread>>> = None;
 
@@ -42,7 +44,7 @@ fn next_pid() -> u64 {
 pub struct Process {
     _pid: u64,
     next_tid: AtomicU64,
-    _pagemap: Arc<Mutex<Pagemap>>,
+    _pagemap: &'static Arc<Mutex<Pagemap>>,
     children: Vec<Arc<Mutex<Thread>>>,
 }
 
@@ -50,9 +52,11 @@ unsafe impl Send for Process {}
 unsafe impl Sync for Process {}
 
 impl Process {
-    pub fn new(_pagemap: Arc<Mutex<Pagemap>>) -> Self {
+    pub fn new(_pagemap: &'static Arc<Mutex<Pagemap>>) -> Self {
+        let _pid = next_pid();
+        // debug!("spawning new process {}", _pid);
         Self {
-            _pid: next_pid(),
+            _pid,
             next_tid: AtomicU64::new(1),
             _pagemap,
             children: Vec::new(),
@@ -75,12 +79,14 @@ unsafe impl Sync for Thread {}
 unsafe impl Send for Thread {}
 
 impl Thread {
-    pub fn new(proc: Arc<Mutex<Process>>, func: u64) -> Self {
+    pub fn new(proc: &'static Arc<Mutex<Process>>, func: u64) -> Self {
+        let _tid = proc.lock().next_tid();
+        // debug!("spawning new thread {}", _tid);
         let _kstack = unsafe {
             alloc::alloc::alloc(Layout::from_size_align(STACK_SIZE, 0x8).unwrap()) as u64
         };
         Self {
-            _tid: proc.lock().next_tid(),
+            _tid,
             _kstack,
             regs: StackFrame {
                 #[cfg(target_arch = "x86_64")]
@@ -104,7 +110,7 @@ impl Thread {
 
                 ..Default::default()
             },
-            _parent: Arc::downgrade(&proc),
+            _parent: Arc::downgrade(proc),
         }
     }
 }
@@ -123,7 +129,7 @@ pub fn schedule(regs: *mut StackFrame) {
             enqueue(ct)
         }
 
-        unsafe { CURRENT_THREAD = Some(Arc::clone(&n)) };
+        unsafe { CURRENT_THREAD = Some(n.clone()) };
 
         memcpy(
             regs as *mut c_void,
@@ -134,28 +140,26 @@ pub fn schedule(regs: *mut StackFrame) {
     lapic::arm(TIMESLICE * 1_000_000, 0xFF);
 }
 
+#[inline(always)]
 fn next_thread() -> Option<Arc<Mutex<Thread>>> {
     unsafe { QUEUE.pop_back() }
 }
 
+#[inline(always)]
 fn enqueue(thread: Arc<Mutex<Thread>>) {
     unsafe { QUEUE.push_front(thread) };
 }
 
-pub static mut PID0: OnceCell<Arc<Mutex<Process>>> = OnceCell::new();
-
 pub fn init_pid0() {
     unsafe {
-        PID0.set(Arc::new(Mutex::new(Process::new(Arc::clone(
-            PAGEMAP.get().unwrap(),
-        )))))
-        .ok();
+        PID0.set(Arc::new(Mutex::new(Process::new(PAGEMAP.get().unwrap()))))
+            .ok();
         PROCESSES.push(Arc::clone(PID0.get().unwrap()));
     }
 }
 
-pub fn new_thread(proc: Arc<Mutex<Process>>, func: usize) {
-    let thread = Arc::new(Mutex::new(Thread::new(proc.clone(), func as u64)));
+pub fn new_thread(proc: &'static Arc<Mutex<Process>>, func: usize) {
+    let thread = Arc::new(Mutex::new(Thread::new(proc, func as u64)));
     proc.lock().children.push(thread.clone());
     enqueue(thread);
 }

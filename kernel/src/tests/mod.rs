@@ -38,6 +38,7 @@ pub fn init() {
         &memory::simple_allocation,
         &memory::large_vec,
         &memory::many_boxes,
+        &memory::malloc_test,
     ]);
     println!("\nTimer tests...");
     test_runner(&[

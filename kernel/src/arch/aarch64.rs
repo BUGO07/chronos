@@ -49,6 +49,8 @@ pub fn _start() -> ! {
         info!("display {}: size - {}x{}", i + 1, fb.width(), fb.height());
     }
 
+    info!("rocking a(n) {}", crate::utils::asm::get_cpu());
+
     let memory_bytes = get_usable_memory();
     let gib = memory_bytes / (1024 * 1024 * 1024);
     let gremainder = memory_bytes % (1024 * 1024 * 1024);

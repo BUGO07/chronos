@@ -34,6 +34,7 @@ extern "C" fn free(ptr: *mut core::ffi::c_void, size: usize) {
     unsafe { alloc::alloc::dealloc(ptr as *mut u8, Layout::from_size_align(size, 0x10).unwrap()) };
 }
 
+const FONT: &[u8] = include_bytes!("../../res/font.bin");
 const FONT_WIDTH: usize = 8;
 const FONT_HEIGHT: usize = 16;
 const FONT_SPACING: usize = 1;
@@ -100,7 +101,7 @@ impl Writer {
                             null_mut(),
                             null_mut(),
                             null_mut(),
-                            include_bytes!("../../res/font.bin").as_ptr() as *mut core::ffi::c_void,
+                            FONT.as_ptr() as *mut core::ffi::c_void,
                             FONT_WIDTH,
                             FONT_HEIGHT,
                             FONT_SPACING,
@@ -165,52 +166,49 @@ pub fn _print(args: fmt::Arguments) {
                 writer.write_fmt(args).expect("Printing failed");
             }
         };
-        #[cfg(target_arch = "x86_64")]
         crate::utils::asm::without_ints(closure);
-        #[cfg(target_arch = "aarch64")]
-        closure();
     }
 }
 
 #[doc(hidden)]
 pub fn _print_fill(what: &str, with: &str, newline: bool) {
-    if with.is_empty() {
-        serial_print!("{}", what.repeat(65));
-    } else {
-        serial_print!("{} {} {}", what.repeat(25), with, what.repeat(25));
-    }
-    if newline {
-        serial_print!("\n");
-    }
-    if get_memory_init_stage() > 0 {
-        let closure = || {
-            for (i, writer) in WRITERS.lock().iter_mut().enumerate() {
-                let width = get_framebuffers().nth(i).unwrap().width() as usize;
-                let cols = (width - 2 * MARGIN) / (1 + FONT_WIDTH * FONT_SCALE_X);
-                if with.is_empty() {
-                    writer
-                        .write_fmt(format_args!("{}", what.repeat(cols)))
-                        .expect("Printing failed");
-                } else {
-                    let x = what.repeat(cols / 2 - with.len() / 2 - 1);
-                    writer
-                        .write_fmt(format_args!(
-                            "{} {} {}{}",
-                            x,
-                            with,
-                            x,
-                            if cols % 2 == 1 { what } else { "" }
-                        ))
-                        .expect("Printing failed");
-                };
-                if newline {
-                    writer.write("\n");
+    #[cfg(not(feature = "uacpi_test"))]
+    {
+        if with.is_empty() {
+            serial_print!("{}", what.repeat(65));
+        } else {
+            serial_print!("{} {} {}", what.repeat(25), with, what.repeat(25));
+        }
+        if newline {
+            serial_print!("\n");
+        }
+        if get_memory_init_stage() > 0 {
+            let closure = || {
+                for (i, writer) in WRITERS.lock().iter_mut().enumerate() {
+                    let width = get_framebuffers().nth(i).unwrap().width() as usize;
+                    let cols = (width - 2 * MARGIN) / (1 + FONT_WIDTH * FONT_SCALE_X);
+                    if with.is_empty() {
+                        writer
+                            .write_fmt(format_args!("{}", what.repeat(cols)))
+                            .expect("Printing failed");
+                    } else {
+                        let x = what.repeat(cols / 2 - with.len() / 2 - 1);
+                        writer
+                            .write_fmt(format_args!(
+                                "{} {} {}{}",
+                                x,
+                                with,
+                                x,
+                                if cols % 2 == 1 { what } else { "" }
+                            ))
+                            .expect("Printing failed");
+                    };
+                    if newline {
+                        writer.write("\n");
+                    }
                 }
-            }
-        };
-        #[cfg(target_arch = "x86_64")]
-        crate::utils::asm::without_ints(closure);
-        #[cfg(target_arch = "aarch64")]
-        closure();
+            };
+            crate::utils::asm::without_ints(closure);
+        }
     }
 }

@@ -17,7 +17,9 @@ mod x86_64 {
         debug, info,
         utils::{
             align_down, align_up,
-            limine::{get_executable_address, get_executable_file},
+            limine::{
+                get_executable_address, get_executable_file, get_hhdm_offset, get_memory_map,
+            },
         },
     };
 
@@ -72,7 +74,7 @@ mod x86_64 {
             let pml2_entry = (virt & (0x1ff << 21)) >> 21;
             let pml1_entry = (virt & (0x1ff << 12)) >> 12;
 
-            let pml4 = (self.top_level as u64 + super::super::get_hhdm_offset()) as *mut Table;
+            let pml4 = (self.top_level as u64 + get_hhdm_offset()) as *mut Table;
 
             let pml3 = get_next_level(pml4, pml4_entry, true);
             if pml3.is_null() {
@@ -112,24 +114,17 @@ mod x86_64 {
     }
 
     fn alloc_table() -> *mut Table {
-        let ptr = unsafe {
-            (alloc::alloc::alloc(Layout::from_size_align(0x1000, 0x1000).unwrap()) as u64
-                - super::super::get_hhdm_offset()) as *mut Table
-        };
         unsafe {
-            for i in 0..512 {
-                (*((ptr as u64 + super::super::get_hhdm_offset()) as *mut Table)).entries[i] = 0;
-            }
+            (alloc::alloc::alloc_zeroed(Layout::from_size_align(0x1000, 0x1000).unwrap()) as u64
+                - get_hhdm_offset()) as *mut Table
         }
-        ptr
     }
 
     fn get_next_level(top_level: *mut Table, idx: u64, allocate: bool) -> *mut Table {
         unsafe {
             let entry = top_level.cast::<u64>().add(idx as usize);
             if *entry & flag::PRESENT != 0 {
-                return ((*entry & 0x000FFFFFFFFFF000) + super::super::get_hhdm_offset())
-                    as *mut Table;
+                return ((*entry & 0x000FFFFFFFFFF000) + get_hhdm_offset()) as *mut Table;
             }
 
             if !allocate {
@@ -138,13 +133,13 @@ mod x86_64 {
 
             let next_level = alloc_table() as u64;
             *entry = next_level | flag::RW | flag::USER;
-            (next_level + super::super::get_hhdm_offset()) as *mut Table
+            (next_level + get_hhdm_offset()) as *mut Table
         }
     }
 
     pub fn init() {
-        let mem_map = super::super::get_memory_map();
-        let hhdm_offset = super::super::get_hhdm_offset();
+        let mem_map = get_memory_map();
+        let hhdm_offset = get_hhdm_offset();
         info!("setting up the kernel pagemap...");
         debug!("hhdm offset is: 0x{:X}", hhdm_offset);
 
@@ -180,7 +175,9 @@ mod x86_64 {
             );
 
             for i in (base..end).step_by(psize as usize) {
-                pmap.map(i + hhdm_offset, i, flag::RW, psize);
+                if !pmap.map(i + hhdm_offset, i, flag::RW, psize) {
+                    panic!("couldn't map 0x{:X} -> 0x{:X}", i, i + hhdm_offset);
+                }
             }
         }
 
@@ -191,7 +188,13 @@ mod x86_64 {
         let size = get_executable_file().size();
 
         for i in (0..size).step_by(page_size::SMALL as usize) {
-            pmap.map(virt_base + i, phys_base + i, flag::RW, page_size::SMALL);
+            if !pmap.map(virt_base + i, phys_base + i, flag::RW, page_size::SMALL) {
+                panic!(
+                    "couldn't map kernel executable 0x{:X} -> 0x{:X}",
+                    virt_base + i,
+                    phys_base + i
+                );
+            }
         }
 
         unsafe {

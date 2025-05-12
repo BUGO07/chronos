@@ -36,3 +36,16 @@ pub fn elapsed_time_pretty(ns: u64, digits: u32) -> alloc::string::String {
         width = digits as usize
     )
 }
+
+#[inline(always)]
+pub fn busywait_ns(ns: u64) {
+    let start = crate::arch::drivers::time::preferred_timer_ns();
+    while crate::arch::drivers::time::preferred_timer_ns() - start < ns {
+        core::hint::spin_loop();
+    }
+}
+
+#[inline(always)]
+pub fn busywait_ms(ms: u64) {
+    busywait_ns(ms * 1_000_000);
+}
