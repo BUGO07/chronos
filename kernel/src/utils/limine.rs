@@ -83,7 +83,9 @@ pub fn get_mp_response() -> &'static mut MpResponse {
 }
 
 pub fn get_rsdp_address() -> usize {
-    RSDP_REQUEST.get_response().unwrap().address() - get_hhdm_offset() as usize // without this it crashes in BIOS
+    let rsdp = RSDP_REQUEST.get_response().unwrap().address();
+    let hddm = get_hhdm_offset() as usize;
+    if rsdp < hddm { rsdp } else { rsdp - hddm }
 }
 
 pub fn get_bootloader_info() -> &'static BootloaderInfoResponse {
