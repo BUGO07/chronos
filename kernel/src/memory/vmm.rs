@@ -14,7 +14,7 @@ mod x86_64 {
     use spin::Mutex;
 
     use crate::{
-        debug, info,
+        debug, error, info,
         utils::{
             align_down, align_up,
             limine::{
@@ -69,12 +69,17 @@ mod x86_64 {
         }
 
         pub fn map(&mut self, virt: u64, phys: u64, mut flags: u64, psize: u64) -> bool {
+            let hhdm = get_hhdm_offset();
+            if !(phys <= !0 - hhdm || phys >= hhdm) {
+                error!("illegal physical address: 0x{:X}", phys);
+                return false;
+            }
             let pml4_entry = (virt & (0x1ff << 39)) >> 39;
             let pml3_entry = (virt & (0x1ff << 30)) >> 30;
             let pml2_entry = (virt & (0x1ff << 21)) >> 21;
             let pml1_entry = (virt & (0x1ff << 12)) >> 12;
 
-            let pml4 = (self.top_level as u64 + get_hhdm_offset()) as *mut Table;
+            let pml4 = (self.top_level as u64 + hhdm) as *mut Table;
 
             let pml3 = get_next_level(pml4, pml4_entry, true);
             if pml3.is_null() {
@@ -122,9 +127,13 @@ mod x86_64 {
 
     fn get_next_level(top_level: *mut Table, idx: u64, allocate: bool) -> *mut Table {
         unsafe {
+            let hhdm = get_hhdm_offset();
             let entry = top_level.cast::<u64>().add(idx as usize);
+            if !(*entry <= !0 - hhdm || *entry >= hhdm) {
+                panic!("illegal entry: 0x{:X}", *entry);
+            }
             if *entry & flag::PRESENT != 0 {
-                return ((*entry & 0x000FFFFFFFFFF000) + get_hhdm_offset()) as *mut Table;
+                return ((*entry & 0x000FFFFFFFFFF000) + hhdm) as *mut Table;
             }
 
             if !allocate {
@@ -133,7 +142,7 @@ mod x86_64 {
 
             let next_level = alloc_table() as u64;
             *entry = next_level | flag::RW | flag::USER;
-            (next_level + get_hhdm_offset()) as *mut Table
+            (next_level + hhdm) as *mut Table
         }
     }
 
@@ -175,6 +184,10 @@ mod x86_64 {
             );
 
             for i in (base..end).step_by(psize as usize) {
+                if !(i <= !0 - hhdm_offset || i >= hhdm_offset) {
+                    error!("illegal physical address: 0x{:X}", i);
+                    continue;
+                }
                 if !pmap.map(i + hhdm_offset, i, flag::RW, psize) {
                     panic!("couldn't map 0x{:X} -> 0x{:X}", i, i + hhdm_offset);
                 }
