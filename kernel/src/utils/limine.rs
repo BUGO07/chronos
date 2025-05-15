@@ -8,9 +8,9 @@ use limine::{
     framebuffer::Framebuffer,
     memory_map::Entry,
     request::{
-        BootloaderInfoRequest, ExecutableAddressRequest, ExecutableFileRequest, FramebufferRequest,
-        HhdmRequest, MemoryMapRequest, MpRequest, RequestsEndMarker, RequestsStartMarker,
-        RsdpRequest,
+        BootloaderInfoRequest, DeviceTreeBlobRequest, ExecutableAddressRequest,
+        ExecutableFileRequest, FramebufferRequest, HhdmRequest, MemoryMapRequest, MpRequest,
+        RequestsEndMarker, RequestsStartMarker, RsdpRequest,
     },
     response::{BootloaderInfoResponse, ExecutableAddressResponse, MpResponse},
 };
@@ -45,7 +45,7 @@ pub static EXECUTABLE_FILE_REQUEST: ExecutableFileRequest = ExecutableFileReques
 
 #[used]
 #[unsafe(link_section = ".requests")]
-pub static mut MP_REQUEST: MpRequest = MpRequest::new();
+pub static MP_REQUEST: MpRequest = MpRequest::new();
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -54,6 +54,10 @@ pub static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
 #[used]
 #[unsafe(link_section = ".requests")]
 pub static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoRequest::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+pub static DEVICE_TREE_REQUEST: DeviceTreeBlobRequest = DeviceTreeBlobRequest::new();
 
 pub fn get_framebuffers() -> impl Iterator<Item = Framebuffer<'static>> {
     FRAMEBUFFER_REQUEST
@@ -78,8 +82,8 @@ pub fn get_executable_file() -> &'static File {
     EXECUTABLE_FILE_REQUEST.get_response().unwrap().file()
 }
 
-pub fn get_mp_response() -> &'static mut MpResponse {
-    unsafe { MP_REQUEST.get_response_mut().unwrap() }
+pub fn get_mp_response() -> &'static MpResponse {
+    MP_REQUEST.get_response().unwrap()
 }
 
 pub fn get_rsdp_address() -> usize {
@@ -90,4 +94,8 @@ pub fn get_rsdp_address() -> usize {
 
 pub fn get_bootloader_info() -> &'static BootloaderInfoResponse {
     BOOTLOADER_INFO_REQUEST.get_response().unwrap()
+}
+
+pub fn get_device_tree() -> Option<*const ()> {
+    DEVICE_TREE_REQUEST.get_response().map(|x| x.dtb_ptr())
 }

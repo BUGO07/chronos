@@ -12,10 +12,10 @@ Contributors are welcome.
 
 ### x86_64
 - Terminal Emulator
-- Serial
+- Serial IO
 - Interrupts
-- PIT + TSC + KVM + HPET + LAPIC
-- RTC
+- PIT/TSC/KVM/HPET/LAPIC Timers
+- Real Time Clock (RTC)
 - Memory Management
 - PS/2 Keyboard and Mouse
 - Preemptive Scheduler (single core for now)
@@ -26,10 +26,11 @@ Contributors are welcome.
 ### aarch64 (arm64)
 
 - Terminal Emulator
-- Serial
+- Serial IO
 - Generic Timer
-- Memory Management (no pagemap yet)
+- Memory Allocator (no pagemap yet)
 - Cooperative Scheduler
+- Basic Shell (input via serial)
 
 ## TODO:
 

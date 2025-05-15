@@ -21,6 +21,7 @@ pub fn init() {
     outb(0x43, 0b00110100);
     outl(0x40, (PIT_FREQUENCY / 1000) & 0xFF);
     outl(0x40, (PIT_FREQUENCY / 1000) >> 8);
+    crate::arch::interrupts::pic::unmask(0);
     info!("done");
 }
 

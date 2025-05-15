@@ -3,9 +3,11 @@
     Released under EUPL 1.2 License
 */
 
+use core::ffi::CStr;
+
 #[cfg(target_arch = "x86_64")]
 use crate::memory::vmm::{PAGEMAP, flag, page_size};
-use crate::{debug, device::pci::MCFG_ADDRESS, error, println, utils::limine::get_hhdm_offset};
+use crate::{debug, device::pci::MCFG_ADDRESS, println, utils::limine::get_hhdm_offset};
 
 use uacpi_sys::*;
 
@@ -84,30 +86,37 @@ extern "C" fn uacpi_sleepbtn_handler(_: uacpi_handle) -> uacpi_interrupt_ret {
     UACPI_INTERRUPT_HANDLED
 }
 
-pub fn shutdown() {
+pub fn shutdown() -> uacpi_status {
     unsafe {
-        uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S5);
-        uacpi_enter_sleep_state(UACPI_SLEEP_STATE_S5);
+        let ret = uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S5);
+        if ret != UACPI_STATUS_OK {
+            return ret;
+        }
+        uacpi_enter_sleep_state(UACPI_SLEEP_STATE_S5)
     }
 }
 
-pub fn reboot() {
+pub fn reboot() -> uacpi_status {
+    unsafe { uacpi_reboot() }
+}
+
+pub fn sleep() -> uacpi_status {
     unsafe {
-        uacpi_reboot();
+        let ret = uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S3);
+        if ret != UACPI_STATUS_OK {
+            return ret;
+        }
+        uacpi_enter_sleep_state(UACPI_SLEEP_STATE_S3)
     }
 }
 
-pub fn sleep() {
+pub fn hibernate() -> uacpi_status {
     unsafe {
-        uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S3);
-        uacpi_enter_sleep_state(UACPI_SLEEP_STATE_S3);
-    }
-}
-
-pub fn hibernate() {
-    unsafe {
-        uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S4);
-        uacpi_enter_sleep_state(UACPI_SLEEP_STATE_S4);
+        let ret = uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S4);
+        if ret != UACPI_STATUS_OK {
+            return ret;
+        }
+        uacpi_enter_sleep_state(UACPI_SLEEP_STATE_S4)
     }
 }
 
@@ -121,24 +130,40 @@ pub enum PowerAction {
 pub fn perform_power_action(action: PowerAction) {
     match action {
         PowerAction::Shutdown => {
-            println!("Shutting down...");
-            shutdown();
-            error!("Couldn't shutdown...");
+            println!("shutting down...");
+            let ret = shutdown();
+            if ret != UACPI_STATUS_OK {
+                println!("[ error ] couldn't shutdown - {}", unsafe {
+                    CStr::from_ptr(uacpi_status_to_string(ret)).to_string_lossy()
+                });
+            }
         }
         PowerAction::Reboot => {
-            println!("Rebooting...");
-            reboot();
-            error!("Couldn't reboot...");
+            println!("rebooting...");
+            let ret = reboot();
+            if ret != UACPI_STATUS_OK {
+                println!("[ error ] couldn't reboot - {}", unsafe {
+                    CStr::from_ptr(uacpi_status_to_string(ret)).to_string_lossy()
+                });
+            }
         }
         PowerAction::Sleep => {
-            println!("Sleeping...");
-            sleep();
-            error!("Couldn't sleep...");
+            println!("sleeping...");
+            let ret = sleep();
+            if ret != UACPI_STATUS_OK {
+                println!("[ error ] couldn't sleep - {}", unsafe {
+                    CStr::from_ptr(uacpi_status_to_string(ret)).to_string_lossy()
+                });
+            }
         }
         PowerAction::Hibernate => {
-            println!("Hibernating...");
-            hibernate();
-            error!("Couldn't hibernate...");
+            println!("hibernating...");
+            let ret = hibernate();
+            if ret != UACPI_STATUS_OK {
+                println!("[ error ] couldn't hibernate - {}", unsafe {
+                    CStr::from_ptr(uacpi_status_to_string(ret)).to_string_lossy()
+                });
+            }
         }
     }
 }

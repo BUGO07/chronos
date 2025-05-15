@@ -46,6 +46,30 @@ pub fn mask_all() {
     info!("done");
 }
 
+pub fn mask(mut irq: u8) {
+    let port: u16;
+    if irq < 8 {
+        port = PIC1_DATA;
+    } else {
+        port = PIC2_DATA;
+        irq -= 8;
+    }
+    outb(port, inb(port) | (1 << irq));
+    // debug!("masked irq {}", irq);
+}
+
+pub fn unmask(mut irq: u8) {
+    let port: u16;
+    if irq < 8 {
+        port = PIC1_DATA;
+    } else {
+        port = PIC2_DATA;
+        irq -= 8;
+    }
+    outb(port, inb(port) & !(1 << irq));
+    // debug!("unmasked irq {}", irq);
+}
+
 pub fn init() {
     info!("remapping...");
 

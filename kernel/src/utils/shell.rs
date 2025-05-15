@@ -9,16 +9,21 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+
+#[cfg(target_arch = "x86_64")]
+use alloc::collections::vec_deque::VecDeque;
+#[cfg(target_arch = "x86_64")]
 use pc_keyboard::{DecodedKey, KeyCode};
 
 use crate::{
     arch::drivers::time,
     drivers::acpi,
     print, println,
-    utils::{asm::halt_loop, logger::color, time::KernelTimer},
+    utils::{logger::color, time::KernelTimer},
 };
 
-use super::drivers::keyboard::KeyboardState;
+#[cfg(target_arch = "x86_64")]
+use crate::arch::drivers::keyboard::KeyboardState;
 
 pub static mut SHELL: OnceCell<Shell> = OnceCell::new();
 
@@ -30,23 +35,39 @@ lazy_static::lazy_static! {
         .collect();
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn shell_thread() -> ! {
     unsafe { SHELL.set(Shell::new()).ok() };
     print!("$ ");
-    halt_loop();
-    // TODO: implement thread sleep to make cursor blink work (default ansi way doesnt work)
-    // let mut visible = true;
+    loop {
+        let shell = unsafe { SHELL.get_mut().unwrap() };
+        if let Some((dc, keyboard_state)) = shell.event_queue.pop_front() {
+            shell.key_event(dc, keyboard_state);
+        }
+        crate::utils::asm::halt();
+    }
+}
 
-    // loop {
-    //     if preferred_timer_ms() % 700 == 0 {
-    //         if visible {
-    //             print!("\x1b[?25l");
-    //         } else {
-    //             print!("\x1b[?25h");
-    //         }
-    //         visible = !visible;
-    //     }
-    // }
+#[cfg(target_arch = "x86_64")]
+pub fn cursor_thread() -> ! {
+    let mut visible = true;
+    loop {
+        // blinking cursor
+        if visible {
+            print!("\x1b[?25h");
+        } else {
+            print!("\x1b[?25l");
+        }
+        visible = !visible && unsafe { !RUNNING_RTC };
+        crate::scheduler::thread::sleep_ms(500);
+        crate::utils::asm::halt();
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub async fn shell_task() {
+    unsafe { SHELL.set(Shell::new()).ok() };
+    print!("$ ");
 }
 
 pub struct Shell {
@@ -55,6 +76,8 @@ pub struct Shell {
     prev_commands: Vec<String>,
     color_fg: String,
     color_bg: String,
+    #[cfg(target_arch = "x86_64")]
+    pub event_queue: VecDeque<(DecodedKey, &'static KeyboardState)>,
 }
 
 impl Default for Shell {
@@ -71,11 +94,14 @@ impl Shell {
             prev_commands: Vec::new(),
             color_fg: color::RESET.to_string(),
             color_bg: color::RESET.to_string(),
+            #[cfg(target_arch = "x86_64")]
+            event_queue: VecDeque::new(),
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
     pub fn key_event(&mut self, dc: DecodedKey, keyboard_state: &KeyboardState) {
-        print!("\x1b[?25h");
+        print!("\x1b[?25h"); // cursor high (this is how other shells do it when they have a blinking cursor idk)
         match keyboard_state.keys_down.as_slice() {
             [KeyCode::LControl, KeyCode::C] => {
                 print!("^C\n$ ");
@@ -96,7 +122,7 @@ impl Shell {
                 // enter
                 else if character == '\n' || character == '\r' {
                     println!();
-                    let raw_input = core::str::from_utf8(&self.input).unwrap().trim().replace(
+                    let raw_input = str::from_utf8(&self.input).unwrap().trim().replace(
                         "!!",
                         self.last_commands
                             .last()
@@ -155,29 +181,105 @@ impl Shell {
             },
         }
     }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn key_event(&mut self, character: char) {
+        print!("\x1b[?25h");
+        // backspace
+        if character == '\u{8}' {
+            if !self.input.is_empty() {
+                print!("\x08 \x08");
+                self.input.pop();
+            }
+        }
+        // enter
+        else if character == '\n' || character == '\r' {
+            println!();
+            let raw_input = str::from_utf8(&self.input).unwrap().trim().replace(
+                "!!",
+                self.last_commands
+                    .last()
+                    .map(|x| x.as_str())
+                    .unwrap_or_default(),
+            );
+            let mut split_input = raw_input.split(" ");
+            let cmd = split_input.next().unwrap();
+            let args = Vec::from_iter(split_input);
+            run_command(cmd, args, self);
+            self.prev_commands.reverse();
+            self.last_commands.append(&mut self.prev_commands);
+            if !raw_input.is_empty() {
+                self.last_commands.push(raw_input);
+            }
+            print!("$ ");
+            self.input.clear();
+        }
+        // del, esc, tab, etc
+        else if !INVISIBLE_CHARS.contains(&(character as u8)) {
+            self.input.push(character as u8);
+            print!("{}", character);
+        }
+        // DecodedKey::RawKey(key) => match key {
+        //     KeyCode::ArrowUp => {
+        //         if !self.last_commands.is_empty() {
+        //             print!("\x1b[2K\x1b[1G");
+        //             if !self.input.is_empty() {
+        //                 self.prev_commands
+        //                     .push(String::from_utf8(self.input.clone()).unwrap());
+        //             }
+        //             self.input.clear();
+        //             let last_input = self.last_commands.pop().unwrap();
+        //             self.input = last_input.as_bytes().to_vec();
+        //             print!("$ {last_input}");
+        //         }
+        //     }
+        //     KeyCode::ArrowDown => {
+        //         print!("\x1b[2K\x1b[1G");
+        //         if !self.input.is_empty() {
+        //             self.last_commands
+        //                 .push(String::from_utf8(self.input.clone()).unwrap());
+        //         }
+        //         self.input.clear();
+        //         self.input.clear();
+        //         if !self.prev_commands.is_empty() {
+        //             let last_input = self.prev_commands.pop().unwrap();
+        //             self.input = last_input.as_bytes().to_vec();
+        //             print!("$ {last_input}");
+        //         } else {
+        //             print!("$ ");
+        //         }
+        //     }
+        //     _ => {}
+        // },
+    }
 }
+
+#[cfg(target_arch = "x86_64")]
+static mut RUNNING_RTC: bool = false;
 
 pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
     match cmd {
         "help" | "?" => {
             println!(
-                "\nlist of commands:\n\n\t\
-            !! - replaced with the last command (like linux)\n\t\
-            help (?) - provides help\n\t\
-            time [digits] - current time given from all the timers\n\t\
-            date [timezone] - current date given from the RTC\n\t\
-            clear - clears the screen\n\t\
-            color [x] changes the color of the terminal (like windows or use hex)\n\t\
-            bg [x] changes the background of the terminal (like windows or use hex)\n\t\
-            echo [what] - echoes the input\n\t\
-            nooo - prints nooo\n\t\
-            shutdown - shuts the system down\n\t\
-            reboot - reboots the system\n\t\
-            suspend - suspends the system\n\t\
-            hibernate - hibernates the system\n\t\
-            pagefault - pagefaults on purpose\n\t\
-            panic [message] - panics on command with the command arguments as the panic info\n\t\
-            "
+                "\nlist of commands:\n    \
+            !! - replaced with the last command (like linux)\n    \
+            help (?) - provides help\n    \
+            time [digits] - current time given from all the timers\n    \
+            date [timezone] - current date given from the RTC\n    \
+            rtc [timezone] - does the same as `date` but infinite loop (unless stopped by ESC)\n    \
+            clear - clears the screen\n    \
+            color [x] changes the color of the terminal (like windows or use hex)\n    \
+            bg [x] changes the background of the terminal (like windows or use hex)\n    \
+            echo [what] - echoes the input\n    \
+            nooo - prints nooo\n    \
+            tasks - goofy ahh task manager/system monitor\n    \
+            kill [pid] - kill a process\n    \
+            shutdown - shuts the system down\n    \
+            reboot - reboots the system\n    \
+            suspend - suspends the system\n    \
+            hibernate - hibernates the system\n    \
+            pagefault - pagefaults on purpose\n    \
+            panic [message] - panics on command with the command arguments as the panic info\n"
             )
         }
         "time" => {
@@ -186,30 +288,47 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             } else {
                 5
             };
-            println!("PIT - {}", time::pit::elapsed_pretty(digits));
-            if time::TIMERS_INIT_STATE.load(Ordering::Relaxed) >= 4 {
-                unsafe {
-                    let kvm = time::kvm::KVM_TIMER
-                        .get()
-                        .expect("couldn't access kvm timer");
-                    let tsc = time::tsc::TSC_TIMER
-                        .get()
-                        .expect("couldn't access tsc timer");
-                    let hpet = time::hpet::HPET_TIMER
-                        .get()
-                        .expect("couldn't access hpet timer");
-                    if kvm.is_supported() {
-                        println!("KVM - {}", kvm.elapsed_pretty(digits));
+            #[cfg(target_arch = "x86_64")]
+            {
+                println!("PIT - {}", time::pit::elapsed_pretty(digits));
+                if time::TIMERS_INIT_STATE.load(Ordering::Relaxed) >= 4 {
+                    unsafe {
+                        let kvm = time::kvm::KVM_TIMER
+                            .get()
+                            .expect("couldn't access kvm timer");
+                        let tsc = time::tsc::TSC_TIMER
+                            .get()
+                            .expect("couldn't access tsc timer");
+                        let hpet = time::hpet::HPET_TIMER
+                            .get()
+                            .expect("couldn't access hpet timer");
+                        if kvm.is_supported() {
+                            println!("KVM - {}", kvm.elapsed_pretty(digits));
+                        }
+                        if tsc.is_supported() {
+                            println!("TSC - {}", tsc.elapsed_pretty(digits));
+                        }
+                        if hpet.is_supported() {
+                            println!("HPET- {}", hpet.elapsed_pretty(digits));
+                        }
                     }
-                    if tsc.is_supported() {
-                        println!("TSC - {}", tsc.elapsed_pretty(digits));
-                    }
-                    if hpet.is_supported() {
-                        println!("HPET- {}", hpet.elapsed_pretty(digits));
+                }
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                if time::TIMERS_INIT_STATE.load(Ordering::Relaxed) >= 1 {
+                    let generic = unsafe {
+                        time::generic::GENERIC_TIMER
+                            .get()
+                            .expect("couldn't access generic timer")
+                    };
+                    if generic.is_supported() {
+                        println!("Generic - {}", generic.elapsed_pretty(digits));
                     }
                 }
             }
         }
+        #[cfg(target_arch = "x86_64")]
         "date" => {
             let default_zone = crate::utils::config::get_config().timezone_offset.to_int();
             let zone = if args.is_empty() {
@@ -226,6 +345,39 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                 rtc_time.datetime_pretty(),
                 rtc_time.timezone_pretty()
             )
+        }
+        #[cfg(target_arch = "x86_64")]
+        "rtc" => {
+            unsafe { RUNNING_RTC = true };
+            loop {
+                if let Some((dc, _)) = unsafe { SHELL.get_mut().unwrap().event_queue.pop_front() } {
+                    // info!("rahh, {dc:?}");
+                    if dc == DecodedKey::RawKey(KeyCode::Escape)
+                        || dc == DecodedKey::Unicode(0x1B as char)
+                    {
+                        println!();
+                        unsafe { RUNNING_RTC = false };
+                        break;
+                    }
+                }
+                let default_zone = crate::utils::config::get_config().timezone_offset.to_int();
+                let zone = if args.is_empty() {
+                    default_zone
+                } else {
+                    args[0].parse().unwrap_or(default_zone)
+                };
+
+                let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
+                    .with_timezone_offset(zone.clamp(-720, 840) as i16)
+                    .adjusted_for_timezone();
+                print!(
+                    "\x1b[2K\r{} | {}",
+                    rtc_time.datetime_pretty(),
+                    rtc_time.timezone_pretty()
+                );
+                crate::scheduler::thread::sleep_ms(100);
+                crate::utils::asm::halt();
+            }
         }
         "clear" => {
             print!("\x1b[2J\x1b[H");
@@ -359,8 +511,66 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
         "nooo" => {
             println!("\n{}\n", crate::NOOO);
         }
+        "tasks" => {
+            #[cfg(target_arch = "x86_64")]
+            {
+                crate::utils::asm::without_ints(|| {
+                    let processes = unsafe { &crate::scheduler::PROCESSES };
+
+                    println!("Processes running: {}", processes.len());
+
+                    for process in processes.iter() {
+                        crate::utils::wait_for_spinlock_arc(process);
+                        let p = process.lock();
+
+                        println!("Process [{}] '{}':", p.get_pid(), p.get_name());
+
+                        for thread in p.get_children().iter() {
+                            crate::utils::wait_for_spinlock_arc(thread);
+                            let t = thread.lock();
+                            println!(
+                                "  Thread [{}] '{}': {:?}",
+                                t.get_tid(),
+                                t.get_name(),
+                                t.get_status()
+                            );
+                        }
+                    }
+                });
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                todo!()
+            }
+        }
+        "kill" => {
+            #[cfg(target_arch = "x86_64")]
+            {
+                if let Ok(pid) = args[0].parse::<u64>() {
+                    if pid == 0 {
+                        println!("congrats dumass, you just killed pid 0, which is the kernel")
+                    }
+                    if crate::scheduler::kill_process(pid) {
+                        println!("process {} terminated", pid);
+                    } else {
+                        println!("process {} not found", pid);
+                    }
+                } else {
+                    println!("invalid pid");
+                }
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                todo!()
+            }
+        }
         "shutdown" => {
+            #[cfg(target_arch = "x86_64")]
             acpi::perform_power_action(acpi::PowerAction::Shutdown);
+            #[cfg(target_arch = "aarch64")]
+            unsafe {
+                core::arch::asm!("mov x0, {0:x}", "hvc #0", in(reg) 0x84000008u64);
+            }
         }
         "reboot" => {
             acpi::perform_power_action(acpi::PowerAction::Reboot);
