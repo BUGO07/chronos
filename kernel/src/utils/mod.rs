@@ -7,6 +7,7 @@ pub mod asm;
 pub mod config;
 pub mod limine;
 pub mod logger;
+pub mod shell;
 pub mod term;
 pub mod time;
 
@@ -20,4 +21,18 @@ pub const fn align_up(addr: u64, align: u64) -> u64 {
 pub const fn align_down(addr: u64, align: u64) -> u64 {
     assert!(align.is_power_of_two());
     addr & !(align - 1)
+}
+
+#[inline(always)]
+pub fn wait_for_spinlock<T>(guard: spin::Mutex<T>) {
+    while guard.is_locked() {
+        core::hint::spin_loop();
+    }
+}
+
+#[inline(always)]
+pub fn wait_for_spinlock_arc<T: ?Sized>(guard: &alloc::sync::Arc<spin::Mutex<T>>) {
+    while guard.is_locked() {
+        core::hint::spin_loop();
+    }
 }

@@ -22,7 +22,7 @@ run-x86_64: ovmf/OVMF_x86_64.fd $(IMAGE_NAME).iso
 	qemu-system-x86_64 \
 		-M q35 \
 		-cpu host \
-		-debugcon stdio \
+		-serial stdio \
 		-device secondary-vga \
 		-bios ovmf/OVMF_x86_64.fd \
 		-boot order=d,menu=on,splash-time=0 \
@@ -51,7 +51,7 @@ test: ovmf/OVMF_x86_64.fd chronos-test.iso
 		-M q35 \
 		-cpu host \
 		-display none \
-		-debugcon stdio \
+		-serial stdio \
 		-bios ovmf/OVMF_x86_64.fd \
 		-boot order=d,menu=on,splash-time=0 \
 		-enable-kvm \
@@ -64,7 +64,7 @@ uacpi-test: ovmf/OVMF_x86_64.fd chronos-uacpi-test.iso
 		-M q35 \
 		-cpu host \
 		-display none \
-		-debugcon stdio \
+		-serial stdio \
 		-bios ovmf/OVMF_x86_64.fd \
 		-enable-kvm \
 		-cdrom chronos-uacpi-test.iso \
@@ -74,7 +74,7 @@ uacpi-test: ovmf/OVMF_x86_64.fd chronos-uacpi-test.iso
 run-bios: $(IMAGE_NAME).iso
 	qemu-system-x86_64 \
 		-M q35 \
-		-debugcon stdio \
+		-serial stdio \
 		-cdrom $(IMAGE_NAME).iso \
 		-boot d \
 		-enable-kvm \

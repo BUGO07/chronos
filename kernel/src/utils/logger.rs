@@ -48,7 +48,6 @@ pub mod color {
     }
 }
 
-// janky but whatever
 pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::fmt::Arguments) {
     #[cfg(not(any(feature = "tests", feature = "uacpi_test")))]
     {

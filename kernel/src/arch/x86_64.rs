@@ -3,13 +3,17 @@
     Released under EUPL 1.2 License
 */
 
+use crate::{
+    arch::drivers::keyboard::keyboard_thread,
+    device::serial::serial_thread,
+    scheduler::PROCESSES,
+    utils::shell::{cursor_thread, shell_thread},
+};
 use alloc::{string::ToString, vec::Vec};
 use core::{
     panic::PanicInfo,
     sync::atomic::{AtomicU64, Ordering},
 };
-use drivers::keyboard::keyboard_thread;
-use shell::shell_thread;
 
 use crate::{
     NOOO, info,
@@ -24,7 +28,6 @@ use crate::{
 pub mod drivers;
 pub mod gdt;
 pub mod interrupts;
-pub mod shell;
 pub mod system;
 
 pub static CPU_FREQ: AtomicU64 = AtomicU64::new(0);
@@ -37,6 +40,7 @@ struct StackTrace {
 }
 
 pub fn _start() -> ! {
+    crate::device::serial::init();
     println!("\n{NOOO}\n");
     info!("x86_64 kernel starting...\n");
 
@@ -45,7 +49,6 @@ pub fn _start() -> ! {
     self::gdt::init();
     self::interrupts::init();
     self::interrupts::pic::init();
-    self::interrupts::pic::unmask_all(); // limine masks all IRQs by default // TODO: mask/unmask irqs properly
 
     crate::utils::asm::toggle_ints(true);
 
@@ -65,9 +68,10 @@ pub fn _start() -> ! {
     crate::tests::init();
 
     scheduler::init_pid0();
-    scheduler::new_thread(
+    scheduler::thread::spawn(
         unsafe { scheduler::PID0.get().unwrap() },
         main_thread as usize,
+        "main",
     );
     scheduler::init();
 }
@@ -92,7 +96,7 @@ pub fn main_thread() -> ! {
         info!("display {}: size - {}x{}", i + 1, fb.width(), fb.height());
     }
 
-    let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
+    let rtc_time = self::drivers::time::rtc::RtcTime::current()
         .with_timezone_offset(
             crate::utils::config::get_config()
                 .timezone_offset
@@ -130,15 +134,23 @@ pub fn main_thread() -> ! {
 
     info!("icl ts pmo ♥");
 
-    scheduler::new_thread(
-        unsafe { scheduler::PID0.get().unwrap() },
-        shell_thread as usize,
-    );
+    let pid0 = unsafe { scheduler::PID0.get().unwrap() };
 
-    scheduler::new_thread(
-        unsafe { scheduler::PID0.get().unwrap() },
-        keyboard_thread as usize,
+    scheduler::thread::spawn(pid0, keyboard_thread as usize, "keyboard");
+    scheduler::thread::spawn(pid0, serial_thread as usize, "serial");
+
+    let shell_pid = scheduler::spawn_process(
+        unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
+        "shell",
     );
+    let shell_proc = unsafe {
+        PROCESSES
+            .iter()
+            .find(|p| p.lock().get_pid() == shell_pid)
+            .unwrap()
+    };
+    scheduler::thread::spawn(shell_proc, shell_thread as usize, "main");
+    scheduler::thread::spawn(shell_proc, cursor_thread as usize, "cursor");
 
     halt_loop()
 }
@@ -191,7 +203,7 @@ pub fn _panic(info: &PanicInfo) -> ! {
             }
         }
         println!("~\n~\tstopping code execution and dumping registers\n~\t");
-        let registers = crate::arch::system::cpu::read_registers();
+        let registers = crate::utils::asm::dump_regs();
         println!(
             "~\tr15:    0x{0:016X}  -  rsi:    0x{10:016X}\n\
              ~\tr14:    0x{1:016X}  -  rdx:    0x{11:016X}\n\

@@ -98,7 +98,7 @@ pub fn init() {
 
 pub fn supported() -> bool {
     let mut is_supported = false;
-    let base = crate::arch::system::cpu::kvm_base();
+    let base = crate::utils::asm::kvm_base();
     if base != 0 {
         let id = _cpuid(0x40000001);
         is_supported = (id.eax & (1 << 3)) != 0

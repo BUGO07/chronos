@@ -63,6 +63,7 @@ pub fn init() {
         flush_data_port();
 
         crate::arch::interrupts::install_interrupt(0x2c, mouse_interrupt_handler);
+        crate::arch::interrupts::pic::unmask(12);
         info!("done...");
     });
 }

@@ -4,36 +4,31 @@
 */
 
 use core::{
-    alloc::Layout,
-    arch::asm,
     cell::OnceCell,
     ffi::c_void,
     mem::size_of,
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use alloc::{
-    collections::vec_deque::VecDeque,
-    sync::{Arc, Weak},
-    vec::Vec,
-};
+use alloc::{collections::vec_deque::VecDeque, sync::Arc, vec::Vec};
 use spin::Mutex;
 
 use crate::{
-    arch::{interrupts::StackFrame, system::lapic},
-    memory::{
-        STACK_SIZE,
-        vmm::{PAGEMAP, Pagemap},
+    arch::{drivers::time::preferred_timer_ns, interrupts::StackFrame, system::lapic},
+    memory::vmm::{PAGEMAP, Pagemap},
+    utils::{
+        asm::{halt_loop, mem::memcpy},
+        wait_for_spinlock_arc,
     },
-    utils::asm::{halt_loop, mem::memcpy},
 };
 
+use super::thread::*;
+
 pub static mut PID0: OnceCell<Arc<Mutex<Process>>> = OnceCell::new();
+pub static mut PROCESSES: Vec<Arc<Mutex<Process>>> = Vec::new();
 
 static NEXT_PID: AtomicU64 = AtomicU64::new(0);
 static mut QUEUE: VecDeque<Arc<Mutex<Thread>>> = VecDeque::new();
-static mut PROCESSES: Vec<Arc<Mutex<Process>>> = Vec::new();
-static mut CURRENT_THREAD: Option<Arc<Mutex<Thread>>> = None;
 
 const TIMESLICE: usize = 6;
 
@@ -42,7 +37,8 @@ fn next_pid() -> u64 {
 }
 
 pub struct Process {
-    _pid: u64,
+    name: &'static str,
+    pid: u64,
     next_tid: AtomicU64,
     _pagemap: &'static Arc<Mutex<Pagemap>>,
     children: Vec<Arc<Mutex<Thread>>>,
@@ -52,125 +48,151 @@ unsafe impl Send for Process {}
 unsafe impl Sync for Process {}
 
 impl Process {
-    pub fn new(_pagemap: &'static Arc<Mutex<Pagemap>>) -> Self {
-        let _pid = next_pid();
+    pub fn new(_pagemap: &'static Arc<Mutex<Pagemap>>, name: &'static str) -> Self {
+        let pid = next_pid();
         // debug!("spawning new process {}", _pid);
         Self {
-            _pid,
+            name,
+            pid,
             next_tid: AtomicU64::new(1),
             _pagemap,
             children: Vec::new(),
         }
     }
 
-    fn next_tid(&mut self) -> u64 {
+    pub fn get_name(&self) -> &'static str {
+        self.name
+    }
+
+    pub fn get_pid(&self) -> u64 {
+        self.pid
+    }
+
+    pub fn get_children(&self) -> &Vec<Arc<Mutex<Thread>>> {
+        &self.children
+    }
+
+    pub fn get_children_mut(&mut self) -> &mut Vec<Arc<Mutex<Thread>>> {
+        &mut self.children
+    }
+
+    pub fn next_tid(&mut self) -> u64 {
         self.next_tid.fetch_add(1, Ordering::Relaxed)
     }
 }
 
-struct Thread {
-    _tid: u64,
-    _kstack: u64,
-    regs: StackFrame,
-    _parent: Weak<Mutex<Process>>,
-}
-
-unsafe impl Sync for Thread {}
-unsafe impl Send for Thread {}
-
-impl Thread {
-    pub fn new(proc: &'static Arc<Mutex<Process>>, func: u64) -> Self {
-        let _tid = proc.lock().next_tid();
-        // debug!("spawning new thread {}", _tid);
-        let _kstack = unsafe {
-            alloc::alloc::alloc(Layout::from_size_align(STACK_SIZE, 0x8).unwrap()) as u64
-        };
-        Self {
-            _tid,
-            _kstack,
-            regs: StackFrame {
-                #[cfg(target_arch = "x86_64")]
-                rsp: _kstack + STACK_SIZE as u64,
-                #[cfg(target_arch = "x86_64")]
-                rip: func,
-                #[cfg(target_arch = "x86_64")]
-                cs: crate::utils::asm::regs::get_cs_reg() as u64,
-                #[cfg(target_arch = "x86_64")]
-                ss: crate::utils::asm::regs::get_ss_reg() as u64,
-                #[cfg(target_arch = "x86_64")]
-                rflags: 0x202,
-
-                // TODO
-                #[cfg(target_arch = "aarch64")]
-                sp: _kstack + STACK_SIZE as u64,
-                #[cfg(target_arch = "aarch64")]
-                pc: func,
-                #[cfg(target_arch = "aarch64")]
-                pstate: 0,
-
-                ..Default::default()
-            },
-            _parent: Arc::downgrade(proc),
-        }
-    }
-}
-
 pub fn schedule(regs: *mut StackFrame) {
-    let next = next_thread();
-    if let Some(ct) = unsafe { CURRENT_THREAD.clone() } {
+    let mut next = None;
+
+    if let Some(ct) = get_self() {
+        wait_for_spinlock_arc(ct);
+        let mut t = ct.lock();
         memcpy(
-            &raw mut ct.lock().regs as *mut c_void,
+            &raw mut t.regs as *mut c_void,
             regs as *mut c_void,
             size_of::<StackFrame>(),
         );
+        if t.get_status() == &Status::Running {
+            t.set_status(Status::Ready);
+        }
     }
+
+    for _ in 0..unsafe { QUEUE.len() } {
+        if let Some(thread) = unsafe { QUEUE.pop_front() } {
+            wait_for_spinlock_arc(&thread);
+            let mut t = thread.lock();
+            match t.get_status() {
+                Status::Ready => {
+                    next = Some(thread.clone());
+                    break;
+                }
+                Status::Sleeping(when) => {
+                    if &preferred_timer_ns() >= when {
+                        t.set_status(Status::Ready);
+                    }
+                    enqueue(thread.clone());
+                }
+                Status::Blocked | Status::Terminated => {
+                    // ignored
+                }
+                _ => enqueue(thread.clone()),
+            }
+        }
+    }
+
+    if next.is_none() {
+        next = Some(idle0().clone());
+    }
+
     if let Some(n) = next {
-        if let Some(ct) = unsafe { CURRENT_THREAD.clone() } {
-            enqueue(ct)
+        if let Some(ct) = get_self() {
+            enqueue(ct.clone());
         }
 
         unsafe { CURRENT_THREAD = Some(n.clone()) };
 
+        wait_for_spinlock_arc(&n);
+        let mut t = n.lock();
+        t.set_status(Status::Running);
         memcpy(
             regs as *mut c_void,
-            &raw const n.lock().regs as *const c_void,
+            &raw const t.regs as *const c_void,
             size_of::<StackFrame>(),
         );
     }
+
     lapic::arm(TIMESLICE * 1_000_000, 0xFF);
 }
 
 #[inline(always)]
-fn next_thread() -> Option<Arc<Mutex<Thread>>> {
-    unsafe { QUEUE.pop_back() }
+pub fn enqueue(thread: Arc<Mutex<Thread>>) {
+    unsafe { QUEUE.push_back(thread) };
 }
 
-#[inline(always)]
-fn enqueue(thread: Arc<Mutex<Thread>>) {
-    unsafe { QUEUE.push_front(thread) };
+pub fn kill_process(pid: u64) -> bool {
+    unsafe {
+        if pid == 0 {
+            crate::drivers::acpi::shutdown();
+        }
+        if let Some(pos) = PROCESSES.iter().position(|p| p.lock().pid == pid) {
+            let proc = PROCESSES.get(pos).unwrap();
+
+            wait_for_spinlock_arc(proc);
+
+            for thread in proc.lock().children.iter() {
+                wait_for_spinlock_arc(thread);
+                thread.lock().set_status(Status::Terminated);
+            }
+
+            PROCESSES.remove(pos);
+
+            true
+        } else {
+            false
+        }
+    }
+}
+
+pub fn spawn_process(pagemap: &'static Arc<Mutex<Pagemap>>, name: &'static str) -> u64 {
+    unsafe {
+        let proc = Arc::new(Mutex::new(Process::new(pagemap, name)));
+        PROCESSES.push(proc.clone());
+        proc.lock().get_pid()
+    }
 }
 
 pub fn init_pid0() {
     unsafe {
-        PID0.set(Arc::new(Mutex::new(Process::new(PAGEMAP.get().unwrap()))))
-            .ok();
-        PROCESSES.push(Arc::clone(PID0.get().unwrap()));
+        PID0.set(Arc::new(Mutex::new(Process::new(
+            PAGEMAP.get().unwrap(),
+            "kernel",
+        ))))
+        .ok();
+        PROCESSES.push(PID0.get().unwrap().clone());
     }
-}
-
-pub fn new_thread(proc: &'static Arc<Mutex<Process>>, func: usize) {
-    let thread = Arc::new(Mutex::new(Thread::new(proc, func as u64)));
-    proc.lock().children.push(thread.clone());
-    enqueue(thread);
 }
 
 pub fn init() -> ! {
-    unsafe {
-        #[cfg(target_arch = "x86_64")]
-        asm!("int $0xFF");
-        #[cfg(target_arch = "aarch64")]
-        asm!("svc #0");
-    }
-
+    yld();
     halt_loop();
 }

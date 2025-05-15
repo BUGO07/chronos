@@ -17,14 +17,18 @@ where
     T: Fn(),
 {
     fn run(&self) {
-        print!("{}...\t", core::any::type_name::<T>());
+        let string = &alloc::format!(
+            "        {}...                        ",
+            core::any::type_name::<T>().split("::").last().unwrap()
+        )[0..35];
+        print!("{}", string);
         self();
         println!("[ok]");
     }
 }
 
 fn test_runner(tests: &[&dyn Testable]) {
-    println!("Running {} test(s)\n", tests.len());
+    println!("    Running {} test(s)", tests.len());
     for test in tests {
         test.run();
     }
