@@ -6,10 +6,10 @@
 use crate::{
     arch::drivers::keyboard::keyboard_thread,
     device::serial::serial_thread,
-    scheduler::PROCESSES,
+    print_centered,
     utils::shell::{cursor_thread, shell_thread},
 };
-use alloc::{string::ToString, vec::Vec};
+use alloc::{format, string::ToString, vec::Vec};
 use core::{
     panic::PanicInfo,
     sync::atomic::{AtomicU64, Ordering},
@@ -52,14 +52,15 @@ pub fn _start() -> ! {
 
     crate::utils::asm::toggle_ints(true);
 
-    self::drivers::time::early_init();
+    self::drivers::time::init();
 
+    crate::drivers::fs::init();
     crate::drivers::acpi::init();
 
     #[cfg(feature = "uacpi_test")]
     crate::drivers::acpi::shutdown();
 
-    self::drivers::time::init();
+    self::drivers::time::init_hpet();
     self::system::cpu::init();
     self::drivers::mouse::init();
     crate::device::pci::pci_enumerate();
@@ -67,13 +68,13 @@ pub fn _start() -> ! {
     #[cfg(feature = "tests")]
     crate::tests::init();
 
-    scheduler::init_pid0();
+    scheduler::init();
     scheduler::thread::spawn(
-        unsafe { scheduler::PID0.get().unwrap() },
+        scheduler::get_scheduler().pid0.get().unwrap(),
         main_thread as usize,
         "main",
     );
-    scheduler::init();
+    scheduler::start();
 }
 
 pub fn main_thread() -> ! {
@@ -134,7 +135,9 @@ pub fn main_thread() -> ! {
 
     info!("icl ts pmo ♥");
 
-    let pid0 = unsafe { scheduler::PID0.get().unwrap() };
+    let sched = scheduler::get_scheduler();
+
+    let pid0 = sched.pid0.get().unwrap();
 
     scheduler::thread::spawn(pid0, keyboard_thread as usize, "keyboard");
     scheduler::thread::spawn(pid0, serial_thread as usize, "serial");
@@ -143,12 +146,11 @@ pub fn main_thread() -> ! {
         unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
         "shell",
     );
-    let shell_proc = unsafe {
-        PROCESSES
-            .iter()
-            .find(|p| p.lock().get_pid() == shell_pid)
-            .unwrap()
-    };
+    let shell_proc = sched
+        .processes
+        .iter()
+        .find(|p| p.lock().get_pid() == shell_pid)
+        .unwrap();
     scheduler::thread::spawn(shell_proc, shell_thread as usize, "main");
     scheduler::thread::spawn(shell_proc, cursor_thread as usize, "cursor");
 
@@ -164,26 +166,35 @@ pub fn _panic(info: &PanicInfo) -> ! {
     }
     #[cfg(not(feature = "tests"))]
     {
-        println!("{}\n{NOOO}\n", crate::utils::logger::color::RED);
+        print!("{}", crate::utils::logger::color::RED);
+        print_centered!(NOOO);
+        println!();
         print_fill!("~", "Kernel Panic");
-        println!("~");
+        print_centered!("", "~");
         // unnecessary but might change in the future
         let msg = info.message().to_string();
         if let Some(location) = info.location() {
-            println!(
-                "~\tERROR: panicked at {}:{}:{} {}{}\n~\t",
-                location.file(),
-                location.line(),
-                location.column(),
-                if msg.is_empty() {
-                    "without a message."
-                } else {
-                    "with message: "
-                },
-                msg,
+            print_centered!(
+                format!(
+                    "ERROR: panicked at {}:{}:{} {}{}\n",
+                    location.file(),
+                    location.line(),
+                    location.column(),
+                    if msg.is_empty() {
+                        "without a message."
+                    } else {
+                        "with message: "
+                    },
+                    msg,
+                )
+                .as_str(),
+                "~"
             );
         } else {
-            println!("~\tERROR: panicked with message: {}\n~\t", info.message(),);
+            print_centered!(
+                format!("ERROR: panicked with message: {}\n", info.message()).as_str(),
+                "~"
+            );
         }
         #[cfg(debug_assertions)]
         {
@@ -193,7 +204,10 @@ pub fn _panic(info: &PanicInfo) -> ! {
             }
             let mut i = 0;
             while let Some(frame) = unsafe { rbp.as_ref() } {
-                println!("~\tframe {}: rip = {:#x}", i, frame.rip);
+                print_centered!(
+                    format!("frame {}: rip = 0x{:016x}", i, frame.rip).as_str(),
+                    "~"
+                );
                 rbp = frame.rbp;
                 i += 1;
 
@@ -202,44 +216,48 @@ pub fn _panic(info: &PanicInfo) -> ! {
                 }
             }
         }
-        println!("~\n~\tstopping code execution and dumping registers\n~\t");
+        print_centered!("\nstopping code execution and dumping registers\n", "~");
         let registers = crate::utils::asm::dump_regs();
-        println!(
-            "~\tr15:    0x{0:016X}  -  rsi:    0x{10:016X}\n\
-             ~\tr14:    0x{1:016X}  -  rdx:    0x{11:016X}\n\
-             ~\tr13:    0x{2:016X}  -  rcx:    0x{12:016X}\n\
-             ~\tr12:    0x{3:016X}  -  rbx:    0x{13:016X}\n\
-             ~\tr11:    0x{4:016X}  -  rax:    0x{14:016X}\n\
-             ~\tr10:    0x{5:016X}  -  rip:    0x{15:016X}\n\
-             ~\tr9:     0x{6:016X}  -  cs:     0x{16:016X}\n\
-             ~\tr8:     0x{7:016X}  -  rflags: 0x{17:016X}\n\
-             ~\trbp:    0x{8:016X}  -  rsp:    0x{18:016X}\n\
-             ~\trdi:    0x{9:016X}  -  ss:     0x{19:016X}\n\
-             ~\tcr2:    0x{20:016X}  -  cr3:    0x{21:016X}\n~",
-            registers.r15,
-            registers.r14,
-            registers.r13,
-            registers.r12,
-            registers.r11,
-            registers.r10,
-            registers.r9,
-            registers.r8,
-            registers.rbp,
-            registers.rdi,
-            registers.rsi,
-            registers.rdx,
-            registers.rcx,
-            registers.rbx,
-            registers.rax,
-            registers.rip,
-            registers.cs,
-            registers.rflags,
-            registers.rsp,
-            registers.ss,
-            registers.cr2,
-            registers.cr3
+        print_centered!(
+            format!(
+                "r15:    0x{0:016X}  rsi:    0x{10:016X}\n\
+                 r14:    0x{1:016X}  rdx:    0x{11:016X}\n\
+                 r13:    0x{2:016X}  rcx:    0x{12:016X}\n\
+                 r12:    0x{3:016X}  rbx:    0x{13:016X}\n\
+                 r11:    0x{4:016X}  rax:    0x{14:016X}\n\
+                 r10:    0x{5:016X}  rip:    0x{15:016X}\n\
+                 r9:     0x{6:016X}  cs:     0x{16:016X}\n\
+                 r8:     0x{7:016X}  rflags: 0x{17:016X}\n\
+                 rbp:    0x{8:016X}  rsp:    0x{18:016X}\n\
+                 rdi:    0x{9:016X}  ss:     0x{19:016X}\n\
+                 cr2:    0x{20:016X}  cr3:    0x{21:016X}\n",
+                registers.r15,
+                registers.r14,
+                registers.r13,
+                registers.r12,
+                registers.r11,
+                registers.r10,
+                registers.r9,
+                registers.r8,
+                registers.rbp,
+                registers.rdi,
+                registers.rsi,
+                registers.rdx,
+                registers.rcx,
+                registers.rbx,
+                registers.rax,
+                registers.rip,
+                registers.cs,
+                registers.rflags,
+                registers.rsp,
+                registers.ss,
+                registers.cr2,
+                registers.cr3
+            )
+            .as_str(),
+            "~"
         );
-        print_fill!("~");
+        print_fill!("~", "", false);
         print!("{}", crate::utils::logger::color::RESET);
         crate::utils::asm::toggle_ints(false);
     }

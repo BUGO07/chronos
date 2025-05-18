@@ -3,7 +3,7 @@
     Released under EUPL 1.2 License
 */
 
-use crate::utils::asm::regs::get_cs_reg;
+use core::arch::asm;
 
 pub mod pic;
 
@@ -77,7 +77,9 @@ impl IdtEntry {
         self.offset1 = ((addr >> 16) & 0xFFFF) as u16;
         self.offset2 = (addr >> 32) as u32;
 
-        self.selector = get_cs_reg();
+        unsafe {
+            asm!("mov {0:x}, cs", out(reg) self.selector, options(nomem, nostack, preserves_flags));
+        }
     }
 }
 
@@ -229,7 +231,7 @@ pub fn init() {
         }
         IDTR.base = IDT.as_ptr() as u64;
 
-        crate::utils::asm::regs::load_idt(&IDTR);
+        asm!("cli; lidt [{}]", in(reg) &IDTR, options(readonly, nostack, preserves_flags));
 
         HANDLERS[0x20] = Some(crate::arch::drivers::time::pit::timer_interrupt_handler);
         HANDLERS[0x21] = Some(crate::arch::drivers::keyboard::keyboard_interrupt_handler);

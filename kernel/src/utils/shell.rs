@@ -10,11 +10,6 @@ use alloc::{
     vec::Vec,
 };
 
-#[cfg(target_arch = "x86_64")]
-use alloc::collections::vec_deque::VecDeque;
-#[cfg(target_arch = "x86_64")]
-use pc_keyboard::{DecodedKey, KeyCode};
-
 use crate::{
     arch::drivers::time,
     drivers::acpi,
@@ -23,7 +18,12 @@ use crate::{
 };
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::drivers::keyboard::KeyboardState;
+use alloc::collections::vec_deque::VecDeque;
+#[cfg(target_arch = "x86_64")]
+use pc_keyboard::{DecodedKey, KeyCode};
+
+#[cfg(target_arch = "x86_64")]
+use crate::{arch::drivers::keyboard::KeyboardState, drivers::fs};
 
 pub static mut SHELL: OnceCell<Shell> = OnceCell::new();
 
@@ -102,13 +102,15 @@ impl Shell {
     #[cfg(target_arch = "x86_64")]
     pub fn key_event(&mut self, dc: DecodedKey, keyboard_state: &KeyboardState) {
         print!("\x1b[?25h"); // cursor high (this is how other shells do it when they have a blinking cursor idk)
-        match keyboard_state.keys_down.as_slice() {
-            [KeyCode::LControl, KeyCode::C] => {
-                print!("^C\n$ ");
-                self.input.clear();
-                return;
-            }
-            _ => {}
+        let slice = keyboard_state.keys_down.as_slice();
+        if slice.contains(&KeyCode::LControl) && slice.contains(&KeyCode::C) {
+            print!("^C\n$ ");
+            self.input.clear();
+            return;
+        }
+        if slice.contains(&KeyCode::F1) {
+            print!("\ncursor pos: {}\n$ ", crate::utils::term::get_cursor_pos());
+            self.input.clear();
         }
         match dc {
             DecodedKey::Unicode(character) => {
@@ -274,6 +276,8 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             nooo - prints nooo\n    \
             tasks - goofy ahh task manager/system monitor\n    \
             kill [pid] - kill a process\n    \
+            ls [path] - lists the current directory\n    \
+            pwd - prints the current working directory\n    \
             shutdown - shuts the system down\n    \
             reboot - reboots the system\n    \
             suspend - suspends the system\n    \
@@ -346,44 +350,146 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                 rtc_time.timezone_pretty()
             )
         }
-        #[cfg(target_arch = "x86_64")]
         "rtc" => {
-            unsafe { RUNNING_RTC = true };
-            loop {
-                if let Some((dc, _)) = unsafe { SHELL.get_mut().unwrap().event_queue.pop_front() } {
-                    // info!("rahh, {dc:?}");
-                    if dc == DecodedKey::RawKey(KeyCode::Escape)
-                        || dc == DecodedKey::Unicode(0x1B as char)
+            #[cfg(target_arch = "x86_64")]
+            {
+                unsafe { RUNNING_RTC = true };
+                loop {
+                    if let Some((dc, keyboard_state)) =
+                        unsafe { SHELL.get_mut().unwrap().event_queue.pop_front() }
                     {
-                        println!();
-                        unsafe { RUNNING_RTC = false };
-                        break;
+                        if dc == DecodedKey::Unicode(0x1B as char) {
+                            println!();
+                            unsafe { RUNNING_RTC = false };
+                            break;
+                        }
+                        match keyboard_state.keys_down.as_slice() {
+                            [KeyCode::LControl, KeyCode::C] | [KeyCode::Escape] => {
+                                println!();
+                                unsafe { RUNNING_RTC = false };
+                                break;
+                            }
+                            _ => {}
+                        }
                     }
-                }
-                let default_zone = crate::utils::config::get_config().timezone_offset.to_int();
-                let zone = if args.is_empty() {
-                    default_zone
-                } else {
-                    args[0].parse().unwrap_or(default_zone)
-                };
+                    let default_zone = crate::utils::config::get_config().timezone_offset.to_int();
+                    let zone = if args.is_empty() {
+                        default_zone
+                    } else {
+                        args[0].parse().unwrap_or(default_zone)
+                    };
 
-                let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
-                    .with_timezone_offset(zone.clamp(-720, 840) as i16)
-                    .adjusted_for_timezone();
-                print!(
-                    "\x1b[2K\r{} | {}",
-                    rtc_time.datetime_pretty(),
-                    rtc_time.timezone_pretty()
-                );
-                crate::scheduler::thread::sleep_ms(100);
-                crate::utils::asm::halt();
+                    let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
+                        .with_timezone_offset(zone.clamp(-720, 840) as i16)
+                        .adjusted_for_timezone();
+                    print!(
+                        "\x1b[2K\r{} | {}",
+                        rtc_time.datetime_pretty(),
+                        rtc_time.timezone_pretty()
+                    );
+                    crate::scheduler::thread::sleep_ms(100);
+                    crate::utils::asm::halt();
+                }
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                todo!()
             }
         }
         "clear" => {
             print!("\x1b[2J\x1b[H");
         }
-        "cursor_info" => {
-            print!("\x1b[6n");
+        #[cfg(target_arch = "x86_64")]
+        "pwd" => {
+            let cwd = crate::scheduler::get_scheduler()
+                .processes
+                .iter()
+                .find(|x| x.lock().get_name() == "shell")
+                .unwrap()
+                .lock()
+                .get_cwd()
+                .clone();
+            println!("{cwd}");
+        }
+        #[cfg(target_arch = "x86_64")]
+        "cd" => {
+            let path = if args.is_empty() {
+                fs::Path::new("/home")
+            } else {
+                let p = fs::Path::new(args[0]);
+                if fs::get_vfs().resolve_path(p.clone()).is_some() {
+                    p
+                } else {
+                    fs::Path::new("/home")
+                }
+            };
+            println!("{path}");
+            crate::scheduler::get_scheduler()
+                .processes
+                .iter()
+                .find(|x| x.lock().get_name() == "shell")
+                .unwrap()
+                .lock()
+                .set_cwd(path);
+        }
+        #[cfg(target_arch = "x86_64")]
+        "ls" => {
+            let cwd = crate::scheduler::get_scheduler()
+                .processes
+                .iter()
+                .find(|x| x.lock().get_name() == "shell")
+                .unwrap()
+                .lock()
+                .get_cwd()
+                .clone();
+            let path = if args.is_empty() {
+                cwd.clone()
+            } else {
+                fs::Path::new(args[0])
+            };
+            let vfs = unsafe { fs::VFS.get_mut().unwrap() };
+            for child in vfs
+                .resolve_path(path)
+                .unwrap_or(vfs.resolve_path(cwd).unwrap()) // goofy ahh
+                .get_children()
+            {
+                print!(
+                    "{}{}{} ",
+                    if child.is_dir() {
+                        color::BLUE
+                    } else if child.get_permissions().execute {
+                        color::GREEN
+                    } else {
+                        color::WHITE_BRIGHT
+                    },
+                    child.get_name(),
+                    color::RESET
+                );
+            }
+            println!();
+        }
+        #[cfg(target_arch = "x86_64")]
+        "mkdir" => {
+            if args.is_empty() {
+                println!("mkdir: what name dumass");
+                return;
+            }
+            let vfs = unsafe { fs::VFS.get_mut().unwrap() };
+            for arg in args {
+                vfs.resolve_path_mut(
+                    crate::scheduler::get_scheduler()
+                        .processes
+                        .iter()
+                        .find(|x| x.lock().get_name() == "shell")
+                        .unwrap()
+                        .lock()
+                        .get_cwd()
+                        .clone(),
+                )
+                .unwrap()
+                .create_dir(arg)
+                .unwrap();
+            }
         }
         "color" => {
             let fg = if !args.is_empty() {
@@ -515,18 +621,16 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             #[cfg(target_arch = "x86_64")]
             {
                 crate::utils::asm::without_ints(|| {
-                    let processes = unsafe { &crate::scheduler::PROCESSES };
+                    let scheduler = crate::scheduler::get_scheduler();
 
-                    println!("Processes running: {}", processes.len());
+                    println!("Processes running: {}", scheduler.processes.len());
 
-                    for process in processes.iter() {
-                        crate::utils::wait_for_spinlock_arc(process);
+                    for process in scheduler.processes.iter() {
                         let p = process.lock();
 
                         println!("Process [{}] '{}':", p.get_pid(), p.get_name());
 
                         for thread in p.get_children().iter() {
-                            crate::utils::wait_for_spinlock_arc(thread);
                             let t = thread.lock();
                             println!(
                                 "  Thread [{}] '{}': {:?}",

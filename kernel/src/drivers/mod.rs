@@ -4,3 +4,4 @@
 */
 
 pub mod acpi;
+pub mod fs;

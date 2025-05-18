@@ -17,19 +17,19 @@ pub mod tsc;
 
 pub static TIMERS_INIT_STATE: AtomicU8 = AtomicU8::new(0);
 
-pub fn early_init() {
+pub fn init() {
     pit::init();
     TIMERS_INIT_STATE.store(1, Ordering::Relaxed);
     kvm::init();
     TIMERS_INIT_STATE.store(2, Ordering::Relaxed);
     tsc::init();
     TIMERS_INIT_STATE.store(3, Ordering::Relaxed);
+    crate::arch::system::lapic::init();
+    TIMERS_INIT_STATE.store(4, Ordering::Relaxed);
 }
 
-pub fn init() {
+pub fn init_hpet() {
     hpet::init();
-    TIMERS_INIT_STATE.store(4, Ordering::Relaxed);
-    crate::arch::system::lapic::init();
     TIMERS_INIT_STATE.store(5, Ordering::Relaxed);
 }
 
@@ -39,9 +39,6 @@ pub fn preferred_timer_ms() -> u64 {
 }
 
 pub fn preferred_timer_ns() -> u64 {
-    let state = TIMERS_INIT_STATE.load(Ordering::Relaxed);
-    let pit = self::pit::current_pit_ticks() * 1_000_000;
-
     unsafe {
         let kvm = crate::arch::drivers::time::kvm::KVM_TIMER
             .get()
@@ -53,9 +50,11 @@ pub fn preferred_timer_ns() -> u64 {
             .get()
             .map(|t| t as &dyn KernelTimer);
 
-        let timers: [&Option<&dyn KernelTimer>; 3] = match state {
-            4..=5 => [&kvm, &tsc, &hpet],
-            2..=3 => [&kvm, &tsc, &None],
+        let timers: [&Option<&dyn KernelTimer>; 3] = match TIMERS_INIT_STATE.load(Ordering::Relaxed)
+        {
+            5 => [&kvm, &tsc, &hpet],
+            3..=4 => [&kvm, &tsc, &None],
+            2 => [&kvm, &None, &None],
             _ => [&None, &None, &None],
         };
 
@@ -65,7 +64,7 @@ pub fn preferred_timer_ns() -> u64 {
             }
         }
 
-        pit
+        self::pit::current_pit_ticks() * 1_000_000
     }
 }
 

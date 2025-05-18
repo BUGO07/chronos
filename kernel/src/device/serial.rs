@@ -24,19 +24,19 @@ const COM1_MODEM_CONTROL: u16 = COM1_BASE + 4;
 const COM1_LINE_STATUS: u16 = COM1_BASE + 5;
 
 #[cfg(target_arch = "aarch64")]
-const UART0_BASE: usize = 0x0900_0000;
+const UART0_BASE: u64 = 0x0900_0000;
 #[cfg(target_arch = "aarch64")]
-const UART0_DR: *mut u32 = UART0_BASE as *mut u32;
+const UART0_DR: u64 = UART0_BASE;
 #[cfg(target_arch = "aarch64")]
-const UART0_FR: *const u32 = (UART0_BASE + 0x18) as *const u32;
+const UART0_FR: u64 = UART0_BASE + 0x18;
 #[cfg(target_arch = "aarch64")]
-const UART0_CR: *mut u32 = (UART0_BASE + 0x30) as *mut u32;
+const UART0_CR: u64 = UART0_BASE + 0x30;
 #[cfg(target_arch = "aarch64")]
-const UART0_IBRD: *mut u32 = (UART0_BASE + 0x24) as *mut u32;
+const UART0_IBRD: u64 = UART0_BASE + 0x24;
 #[cfg(target_arch = "aarch64")]
-const UART0_FBRD: *mut u32 = (UART0_BASE + 0x28) as *mut u32;
+const UART0_FBRD: u64 = UART0_BASE + 0x28;
 #[cfg(target_arch = "aarch64")]
-const UART0_LCRH: *mut u32 = (UART0_BASE + 0x2C) as *mut u32;
+const UART0_LCRH: u64 = UART0_BASE + 0x2C;
 
 pub fn init() {
     #[cfg(target_arch = "x86_64")]
@@ -50,12 +50,12 @@ pub fn init() {
         outb(COM1_MODEM_CONTROL, 0x0B);
     }
     #[cfg(target_arch = "aarch64")]
-    unsafe {
-        UART0_CR.write_volatile(0);
-        UART0_IBRD.write_volatile(1);
-        UART0_FBRD.write_volatile(40);
-        UART0_LCRH.write_volatile(3 << 5);
-        UART0_CR.write_volatile((1 << 0) | (1 << 8) | (1 << 9));
+    {
+        crate::utils::asm::mmio::write(UART0_CR, 0, 4);
+        crate::utils::asm::mmio::write(UART0_IBRD, 1, 4);
+        crate::utils::asm::mmio::write(UART0_FBRD, 40, 4);
+        crate::utils::asm::mmio::write(UART0_LCRH, 3 << 5, 4);
+        crate::utils::asm::mmio::write(UART0_CR, (1 << 0) | (1 << 8) | (1 << 9), 4);
     }
 }
 
@@ -67,9 +67,9 @@ pub fn serial_write(byte: u8) {
     }
     #[cfg(target_arch = "aarch64")]
     {
-        unsafe {
-            while UART0_FR.read_volatile() & (1 << 5) != 0 {}
-            UART0_DR.write_volatile(byte as u32);
+        {
+            while crate::utils::asm::mmio::read(UART0_FR, 4) & (1 << 5) != 0 {}
+            crate::utils::asm::mmio::write(UART0_DR, byte as u64, 4);
         }
     }
 }
@@ -78,13 +78,13 @@ pub fn serial_read() -> u8 {
     #[cfg(target_arch = "x86_64")]
     {
         while (inb(COM1_LINE_STATUS) & 1) == 0 {}
-        inb(COM1_DATA)
+        inb(COM1_DATA) // garbage read on real hardware
     }
     #[cfg(target_arch = "aarch64")]
     {
-        unsafe {
-            while UART0_FR.read_volatile() & (1 << 4) != 0 {}
-            UART0_DR.read_volatile() as u8
+        {
+            while crate::utils::asm::mmio::read(UART0_FR, 4) & (1 << 4) != 0 {}
+            crate::utils::asm::mmio::read(UART0_DR, 4) as u8
         }
     }
 }
@@ -131,8 +131,10 @@ pub struct SerialWriter;
 
 impl Write for SerialWriter {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        for byte in s.bytes() {
-            serial_write(byte);
+        if s != "\x1b[6n" {
+            for byte in s.bytes() {
+                serial_write(byte);
+            }
         }
         Ok(())
     }

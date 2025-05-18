@@ -3,12 +3,9 @@
     Released under EUPL 1.2 License
 */
 
-use crate::{
-    debug, info,
-    utils::asm::regs::{
-        load_gdt, load_tss, set_cs_reg, set_ds_reg, set_es_reg, set_fs_reg, set_gs_reg, set_ss_reg,
-    },
-};
+use core::arch::asm;
+
+use crate::{debug, info};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
@@ -181,19 +178,35 @@ struct Selectors {
 }
 
 pub fn init() {
-    info!("loading gdt");
-    load_gdt(&GDT_PTR);
-    debug!("loading code segment");
-    set_cs_reg(SELECTORS.code_selector.0);
+    unsafe {
+        info!("loading gdt");
+        asm!("lgdt [{}]", in(reg) &raw const *GDT_PTR, options(readonly, nostack, preserves_flags));
 
-    debug!("loading tss");
-    load_tss(SELECTORS.tss_selector.0);
+        debug!("loading code segment");
+        asm!(
+            "push {sel:r}",
+            "lea {tmp}, [55f + rip]",
+            "push {tmp}",
+            "retfq",
+            "55:",
+            sel = in(reg) SELECTORS.code_selector.0,
+            tmp = lateout(reg) _,
+            options(preserves_flags),
+        );
 
-    debug!("loading data segments");
-    let data = SELECTORS.data_selector.0;
-    set_ds_reg(data);
-    set_es_reg(data);
-    set_fs_reg(data);
-    set_gs_reg(data);
-    set_ss_reg(data);
+        debug!("loading tss");
+        asm!("ltr {0:x}", in(reg) SELECTORS.tss_selector.0, options(nostack, preserves_flags));
+
+        debug!("loading data segments");
+        let data = SELECTORS.data_selector.0;
+        asm!(
+            "mov ds, {0:x}",
+            "mov es, {0:x}",
+            "mov fs, {0:x}",
+            "mov gs, {0:x}",
+            "mov ss, {0:x}",
+            in(reg) data,
+            options(nostack, preserves_flags)
+        );
+    }
 }
