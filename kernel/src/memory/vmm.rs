@@ -165,7 +165,13 @@ mod x86_64 {
             }
 
             // ! hard setting this to LARGE stops my laptop from crashing
-            let psize = page_size::LARGE;
+            let psize = if entry.length >= page_size::LARGE {
+                page_size::LARGE
+            } else if entry.length >= page_size::MEDIUM {
+                page_size::MEDIUM
+            } else {
+                page_size::SMALL
+            };
 
             let base = align_down(entry.base, psize);
             let end = align_up(entry.base + entry.length, psize);
