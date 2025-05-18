@@ -5,20 +5,20 @@
 
 use core::cell::UnsafeCell;
 
-use alloc::{collections::linked_list::LinkedList, vec::Vec};
+use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 use pc_keyboard::{HandleControl, KeyCode, Keyboard, ScancodeSet1, layouts::Us104Key};
 
 use crate::{arch::interrupts::StackFrame, utils::asm::port::inb};
 
 pub static mut KEYBOARD_STATE: UnsafeCell<KeyboardState> = UnsafeCell::new(KeyboardState {
     keyboard: Keyboard::new(ScancodeSet1::new(), Us104Key, HandleControl::Ignore),
-    scancodes: LinkedList::new(),
+    scancodes: VecDeque::new(),
     keys_down: Vec::new(),
 });
 
 pub struct KeyboardState {
     pub keyboard: Keyboard<Us104Key, ScancodeSet1>,
-    pub scancodes: LinkedList<u8>,
+    pub scancodes: VecDeque<u8>,
     pub keys_down: Vec<KeyCode>,
 }
 

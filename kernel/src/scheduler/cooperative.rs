@@ -9,11 +9,12 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
     task::{Context, Poll, Waker},
 };
-use spin::Mutex;
+
+use crate::utils::spinlock::SpinLock;
 
 pub struct Scheduler {
     tasks: BTreeMap<TaskId, Task>,
-    task_queue: Arc<Mutex<Vec<TaskId>>>,
+    task_queue: Arc<SpinLock<Vec<TaskId>>>,
     waker_cache: BTreeMap<TaskId, Waker>,
 }
 
@@ -27,7 +28,7 @@ impl Scheduler {
     pub fn new() -> Self {
         Scheduler {
             tasks: BTreeMap::new(),
-            task_queue: Arc::new(Mutex::new(Vec::new())),
+            task_queue: Arc::new(SpinLock::new(Vec::new())),
             waker_cache: BTreeMap::new(),
         }
     }
@@ -85,11 +86,11 @@ impl Scheduler {
 
 struct TaskWaker {
     task_id: TaskId,
-    task_queue: Arc<Mutex<Vec<TaskId>>>,
+    task_queue: Arc<SpinLock<Vec<TaskId>>>,
 }
 
 impl TaskWaker {
-    fn new(task_id: TaskId, task_queue: Arc<Mutex<Vec<TaskId>>>) -> Waker {
+    fn new(task_id: TaskId, task_queue: Arc<SpinLock<Vec<TaskId>>>) -> Waker {
         Waker::from(Arc::new(TaskWaker {
             task_id,
             task_queue,

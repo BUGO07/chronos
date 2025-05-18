@@ -16,33 +16,33 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub enum PropertyValue {
-    Str(String),
-    Int(i64),
-    Bool(bool),
+    String(String),
+    Integer(i64),
+    Boolean(bool),
 }
 
 impl PropertyValue {
     pub fn to_str(&self) -> &str {
         match self {
-            PropertyValue::Str(s) => s,
+            PropertyValue::String(s) => s,
             _ => "",
         }
     }
     pub fn to_unsliced_str(self) -> String {
         match self {
-            PropertyValue::Str(s) => s,
+            PropertyValue::String(s) => s,
             _ => "".to_string(),
         }
     }
     pub fn to_int(self) -> i64 {
         match self {
-            PropertyValue::Int(i) => i,
+            PropertyValue::Integer(i) => i,
             _ => 0,
         }
     }
     pub fn to_bool(self) -> bool {
         match self {
-            PropertyValue::Bool(b) => b,
+            PropertyValue::Boolean(b) => b,
             _ => false,
         }
     }
@@ -54,7 +54,7 @@ pub fn get_config() -> Config {
     let timezone_offset = props
         .get("timezone_offset")
         .cloned()
-        .unwrap_or(PropertyValue::Int(0));
+        .unwrap_or(PropertyValue::Integer(0));
 
     Config { timezone_offset }
 }
@@ -79,11 +79,11 @@ fn parse_config(config: &str) -> BTreeMap<String, PropertyValue> {
                 .trim_end();
 
             let value = if let Ok(int_val) = value.parse::<i64>() {
-                PropertyValue::Int(int_val)
+                PropertyValue::Integer(int_val)
             } else if let Ok(bool_val) = value.parse::<bool>() {
-                PropertyValue::Bool(bool_val)
+                PropertyValue::Boolean(bool_val)
             } else {
-                PropertyValue::Str(value.to_string())
+                PropertyValue::String(value.to_string())
             };
 
             Some((key, value))

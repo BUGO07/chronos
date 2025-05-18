@@ -11,7 +11,6 @@ mod x86_64 {
     use alloc::sync::Arc;
     use core::{alloc::Layout, cell::OnceCell, ptr::null_mut};
     use limine::memory_map::EntryType;
-    use spin::Mutex;
 
     use crate::{
         debug, error, info,
@@ -20,6 +19,7 @@ mod x86_64 {
             limine::{
                 get_executable_address, get_executable_file, get_hhdm_offset, get_memory_map,
             },
+            spinlock::SpinLock,
         },
     };
 
@@ -39,7 +39,7 @@ mod x86_64 {
         pub const RW: u64 = PRESENT | WRITE;
     }
 
-    pub static mut PAGEMAP: OnceCell<Arc<Mutex<Pagemap>>> = OnceCell::new(); // wtf
+    pub static mut PAGEMAP: OnceCell<Arc<SpinLock<Pagemap>>> = OnceCell::new(); // wtf
 
     unsafe impl Send for Pagemap {}
     unsafe impl Sync for Pagemap {}
@@ -165,13 +165,7 @@ mod x86_64 {
             }
 
             // ! hard setting this to LARGE stops my laptop from crashing
-            let psize = if entry.length >= page_size::LARGE {
-                page_size::LARGE
-            } else if entry.length >= page_size::MEDIUM {
-                page_size::MEDIUM
-            } else {
-                page_size::SMALL
-            };
+            let psize = page_size::LARGE;
 
             let base = align_down(entry.base, psize);
             let end = align_up(entry.base + entry.length, psize);
@@ -212,7 +206,7 @@ mod x86_64 {
 
         unsafe {
             core::arch::asm!("mov cr3, {}", in(reg) pmap.top_level as u64, options(nostack));
-            PAGEMAP.set(Arc::new(Mutex::new(pmap))).ok();
+            PAGEMAP.set(Arc::new(SpinLock::new(pmap))).ok();
         }
         info!("done");
     }

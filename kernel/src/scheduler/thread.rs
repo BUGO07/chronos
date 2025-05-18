@@ -5,19 +5,16 @@
 
 use core::{alloc::Layout, arch::asm, cell::OnceCell};
 
+use crate::utils::spinlock::SpinLock;
 use alloc::sync::{Arc, Weak};
-use spin::Mutex;
 
 use crate::{
     arch::{drivers::time::preferred_timer_ns, interrupts::StackFrame},
     memory::STACK_SIZE,
-    scheduler::PID0,
-    utils::{asm::halt_loop, wait_for_spinlock_arc},
+    utils::asm::halt_loop,
 };
 
 use super::*;
-
-pub static mut CURRENT_THREAD: Option<Arc<Mutex<Thread>>> = None;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Status {
@@ -33,7 +30,7 @@ pub struct Thread {
     tid: u64,
     _kstack: u64,
     pub regs: StackFrame,
-    parent: Weak<Mutex<Process>>,
+    parent: Weak<SpinLock<Process>>,
     status: Status,
 }
 
@@ -41,14 +38,13 @@ unsafe impl Sync for Thread {}
 unsafe impl Send for Thread {}
 
 impl Thread {
-    pub fn new(proc: &'static Arc<Mutex<Process>>, func: usize, name: &'static str) -> Self {
-        wait_for_spinlock_arc(proc);
+    pub fn new(proc: &'static Arc<SpinLock<Process>>, func: usize, name: &'static str) -> Self {
         let tid = proc.lock().next_tid();
         // debug!("spawning new thread {}", _tid);
         let _kstack = unsafe {
             alloc::alloc::alloc(Layout::from_size_align(STACK_SIZE, 0x8).unwrap()) as u64
         };
-        Self {
+        let mut thread = Self {
             name,
             tid,
             _kstack,
@@ -57,10 +53,10 @@ impl Thread {
                 rsp: _kstack + STACK_SIZE as u64,
                 #[cfg(target_arch = "x86_64")]
                 rip: func as u64,
-                #[cfg(target_arch = "x86_64")]
-                cs: crate::utils::asm::regs::get_cs_reg() as u64,
-                #[cfg(target_arch = "x86_64")]
-                ss: crate::utils::asm::regs::get_ss_reg() as u64,
+                // #[cfg(target_arch = "x86_64")]
+                // cs: crate::utils::asm::regs::get_cs_reg() as u64,
+                // #[cfg(target_arch = "x86_64")]
+                // ss: crate::utils::asm::regs::get_ss_reg() as u64,
                 #[cfg(target_arch = "x86_64")]
                 rflags: 0x202,
 
@@ -75,7 +71,15 @@ impl Thread {
             },
             parent: Arc::downgrade(proc),
             status: Status::Ready,
+        };
+
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            asm!("mov {0:x}, cs", out(reg) thread.regs.cs, options(nomem, nostack, preserves_flags));
+            asm!("mov {0:x}, ss", out(reg) thread.regs.ss, options(nomem, nostack, preserves_flags));
         }
+
+        thread
     }
 
     pub fn get_name(&self) -> &'static str {
@@ -86,7 +90,7 @@ impl Thread {
         self.tid
     }
 
-    pub fn get_parent(&self) -> &Weak<Mutex<Process>> {
+    pub fn get_parent(&self) -> &Weak<SpinLock<Process>> {
         &self.parent
     }
 
@@ -99,9 +103,8 @@ impl Thread {
     }
 }
 
-pub fn spawn(proc: &'static Arc<Mutex<Process>>, func: usize, name: &'static str) -> u64 {
-    let thread = Arc::new(Mutex::new(Thread::new(proc, func, name)));
-    wait_for_spinlock_arc(&thread);
+pub fn spawn(proc: &'static Arc<SpinLock<Process>>, func: usize, name: &'static str) -> u64 {
+    let thread = Arc::new(SpinLock::new(Thread::new(proc, func, name)));
     proc.lock().get_children_mut().push(thread.clone());
     let tid = thread.lock().get_tid();
     enqueue(thread);
@@ -112,7 +115,6 @@ pub fn sleep(ns: u64) {
     let wakeup_time = preferred_timer_ns() + ns;
 
     if let Some(thread) = get_self() {
-        wait_for_spinlock_arc(thread);
         let mut t = thread.lock();
         t.set_status(Status::Sleeping(wakeup_time));
     }
@@ -136,14 +138,12 @@ pub fn yld() {
 
 pub fn block() {
     if let Some(thread) = get_self() {
-        wait_for_spinlock_arc(thread);
         thread.lock().set_status(Status::Blocked);
         yld();
     }
 }
 
-pub fn wake(thread: &Arc<Mutex<Thread>>) {
-    wait_for_spinlock_arc(thread);
+pub fn wake(thread: &Arc<SpinLock<Thread>>) {
     let mut t = thread.lock();
     if t.get_status() == &Status::Blocked {
         t.set_status(Status::Ready);
@@ -153,25 +153,24 @@ pub fn wake(thread: &Arc<Mutex<Thread>>) {
 
 pub fn terminate() -> ! {
     if let Some(thread) = get_self() {
-        wait_for_spinlock_arc(thread);
         thread.lock().set_status(Status::Terminated);
         yld();
     }
-    halt_loop();
+    halt_loop()
 }
 
-pub fn idle0() -> &'static Arc<Mutex<Thread>> {
-    static mut IDLE: OnceCell<Arc<Mutex<Thread>>> = OnceCell::new();
+pub fn idle0() -> &'static Arc<SpinLock<Thread>> {
+    static mut IDLE: OnceCell<Arc<SpinLock<Thread>>> = OnceCell::new();
     unsafe {
         IDLE.get_or_init(|| {
-            let proc = PID0.get().unwrap();
-            let t = Arc::new(Mutex::new(Thread::new(proc, halt_loop as usize, "idle")));
+            let proc = get_scheduler().pid0.get().unwrap();
+            let t = Arc::new(SpinLock::new(Thread::new(proc, halt_loop as usize, "idle")));
             t.lock().set_status(Status::Ready);
             t
         })
     }
 }
 
-pub fn get_self() -> &'static mut Option<Arc<Mutex<Thread>>> {
-    unsafe { &mut CURRENT_THREAD }
+pub fn get_self() -> &'static mut Option<Arc<SpinLock<Thread>>> {
+    &mut get_scheduler().current
 }

@@ -11,7 +11,6 @@ use core::{
 };
 
 use alloc::{boxed::Box, collections::btree_map::BTreeMap};
-use spin::{Mutex, mutex::SpinMutex};
 use uacpi_sys::*;
 
 use crate::{
@@ -21,7 +20,7 @@ use crate::{
         pci_config_write_u8, pci_config_write_u16, pci_config_write_u32,
     },
     error, info,
-    utils::limine::get_rsdp_address,
+    utils::{limine::get_rsdp_address, mutex::Mutex, spinlock::SpinLock},
     warn,
 };
 
@@ -361,6 +360,13 @@ extern "C" fn uacpi_kernel_stall(usec: uacpi_u8) {
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_sleep(msec: uacpi_u64) {
+    #[cfg(target_arch = "x86_64")]
+    if crate::scheduler::is_initialized() {
+        crate::scheduler::thread::sleep_ms(msec);
+    } else {
+        crate::utils::time::busywait_ms(msec);
+    }
+    #[cfg(target_arch = "aarch64")]
     crate::utils::time::busywait_ms(msec);
 }
 
@@ -373,7 +379,7 @@ extern "C" fn uacpi_kernel_create_mutex() -> uacpi_handle {
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_free_mutex(handle: uacpi_handle) {
     if !handle.is_null() {
-        drop(unsafe { Box::from_raw(handle as *mut Mutex<()>) });
+        let _ = unsafe { Box::from_raw(handle as *mut Mutex<()>) };
     }
 }
 
@@ -547,14 +553,14 @@ extern "C" fn uacpi_kernel_uninstall_interrupt_handler(
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_create_spinlock() -> uacpi_handle {
-    let lock = Box::new(SpinMutex::<()>::new(()));
+    let lock = Box::new(SpinLock::<()>::new(()));
     Box::into_raw(lock) as *mut c_void
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_free_spinlock(handle: uacpi_handle) {
     if !handle.is_null() {
-        let _ = unsafe { Box::from_raw(handle as *mut SpinMutex<()>) };
+        let _ = unsafe { Box::from_raw(handle as *mut SpinLock<()>) };
     }
 }
 
@@ -567,7 +573,7 @@ extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flag
         if ints_enabled {
             crate::utils::asm::toggle_ints(false);
         }
-        let lock = unsafe { &*(handle as *const SpinMutex<()>) };
+        let lock = unsafe { &*(handle as *const SpinLock<()>) };
         lock.lock();
         unsafe { INTS_ENABLED = ints_enabled };
     }
@@ -577,7 +583,7 @@ extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flag
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_unlock_spinlock(handle: uacpi_handle) {
     if !handle.is_null() {
-        let lock = unsafe { &*(handle as *const SpinMutex<()>) };
+        let lock = unsafe { &*(handle as *const SpinLock<()>) };
         unsafe { lock.force_unlock() };
         if unsafe { INTS_ENABLED } {
             crate::utils::asm::toggle_ints(true);

@@ -3,6 +3,7 @@
     Released under EUPL 1.2 License
 */
 
+use crate::utils::spinlock::SpinLock;
 use crate::{memory::get_memory_init_stage, serial_print};
 use alloc::vec::Vec;
 use core::{
@@ -11,12 +12,11 @@ use core::{
     fmt::{self, Write},
     ptr::null_mut,
 };
-use spin::Mutex;
 
 use super::limine::get_framebuffers;
 
 lazy_static::lazy_static! {
-    pub static ref WRITERS: Mutex<Vec<Writer>> = Mutex::new(Writer::new());
+    pub static ref WRITERS: SpinLock<Vec<Writer>> = SpinLock::new(Writer::new());
 }
 
 pub struct Writer {
@@ -42,37 +42,6 @@ const FONT_SCALE_X: usize = 1;
 const FONT_SCALE_Y: usize = 1;
 const MARGIN: usize = 10;
 
-// pub struct Cursor {
-//     pub row: usize,
-//     pub col: usize,
-// }
-
-// impl Default for Cursor {
-//     fn default() -> Self {
-//         Self::new()
-//     }
-// }
-
-// impl Cursor {
-//     pub fn new() -> Self {
-//         Self { row: 1, col: 1 }
-//     }
-
-//     pub fn move_to(&mut self, row: usize, col: usize) {
-//         crate::print!("\x1b[{};{}H", row, col);
-//     }
-
-//     pub fn move_right(&mut self, n: usize) {
-//         self.col += n;
-//         crate::print!("\x1b[{}C", n);
-//     }
-
-//     pub fn move_left(&mut self, n: usize) {
-//         self.col = self.col.saturating_sub(n);
-//         crate::print!("\x1b[{}D", n);
-//     }
-// }
-
 impl Writer {
     fn new() -> Vec<Writer> {
         let mut flanterm_contexts = Vec::new();
@@ -80,7 +49,7 @@ impl Writer {
         {
             for framebuffer in get_framebuffers() {
                 unsafe {
-                    flanterm_contexts.push(Writer {
+                    let writer = Writer {
                         ctx: flanterm_sys::flanterm_fb_init(
                             Some(malloc),
                             Some(free),
@@ -109,7 +78,10 @@ impl Writer {
                             FONT_SCALE_Y,
                             MARGIN,
                         ),
-                    });
+                    };
+                    flanterm_sys::flanterm_set_callback(writer.ctx, Some(callback));
+
+                    flanterm_contexts.push(writer);
                 }
             }
         }
@@ -123,6 +95,23 @@ impl Writer {
         let buf = s.as_ptr();
         unsafe { flanterm_sys::flanterm_write(self.ctx, buf, s.len()) };
     }
+}
+
+static mut CURSOR_POS: u64 = 0;
+
+extern "C" fn callback(
+    _ctx: *mut flanterm_sys::flanterm_context,
+    _second: u64,
+    cursor_x: u64,
+    _fourth: u64,
+    _fifth: u64,
+) {
+    unsafe { CURSOR_POS = cursor_x };
+}
+
+pub fn get_cursor_pos() -> u64 {
+    crate::print!("\x1b[6n");
+    unsafe { CURSOR_POS }
 }
 
 impl fmt::Write for Writer {
@@ -157,6 +146,19 @@ macro_rules! print_fill {
     };
 }
 
+#[macro_export]
+macro_rules! print_centered {
+    ($what:expr) => {
+        $crate::utils::term::_print_centered($what, "", true)
+    };
+    ($what:expr, $with:expr) => {
+        $crate::utils::term::_print_centered($what, $with, true)
+    };
+    ($what:expr, $with:expr, $newline:expr) => {
+        $crate::utils::term::_print_centered($what, $with, $newline)
+    };
+}
+
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     serial_print!("{}", args);
@@ -183,7 +185,7 @@ pub fn _print_fill(what: &str, with: &str, newline: bool) {
             serial_print!("\n");
         }
         if get_memory_init_stage() > 0 {
-            let closure = || {
+            crate::utils::asm::without_ints(|| {
                 for (i, writer) in WRITERS.lock().iter_mut().enumerate() {
                     let width = get_framebuffers().nth(i).unwrap().width() as usize;
                     let cols = (width - 2 * MARGIN) / (1 + FONT_WIDTH * FONT_SCALE_X);
@@ -199,7 +201,7 @@ pub fn _print_fill(what: &str, with: &str, newline: bool) {
                                 x,
                                 with,
                                 x,
-                                if cols % 2 == 1 { what } else { "" }
+                                if cols % 2 != 0 { what } else { "" }
                             ))
                             .expect("Printing failed");
                     };
@@ -207,8 +209,47 @@ pub fn _print_fill(what: &str, with: &str, newline: bool) {
                         writer.write("\n");
                     }
                 }
-            };
-            crate::utils::asm::without_ints(closure);
+            });
+        }
+    }
+}
+
+#[doc(hidden)]
+pub fn _print_centered(what: &str, with: &str, newline: bool) {
+    #[cfg(not(feature = "uacpi_test"))]
+    {
+        serial_print!("{}", what);
+        if newline {
+            serial_print!("\n");
+        }
+        if get_memory_init_stage() > 0 {
+            crate::utils::asm::without_ints(|| {
+                for (i, writer) in WRITERS.lock().iter_mut().enumerate() {
+                    let width = get_framebuffers().nth(i).unwrap().width() as usize;
+                    let cols = (width - 2 * MARGIN) / (1 + FONT_WIDTH * FONT_SCALE_X);
+                    for line in what.split('\n') {
+                        let space = " ".repeat((cols / 2).saturating_sub(line.len() / 2 + 3));
+                        writer
+                            .write_fmt(format_args!(
+                                "{}{} {} {}{}{}",
+                                with,
+                                space,
+                                line,
+                                space,
+                                if (cols % 2 != 0) ^ (line.len() % 2 != 0) {
+                                    " "
+                                } else {
+                                    "  "
+                                },
+                                with,
+                            ))
+                            .expect("Printing failed");
+                        if newline {
+                            writer.write("\n");
+                        }
+                    }
+                }
+            });
         }
     }
 }

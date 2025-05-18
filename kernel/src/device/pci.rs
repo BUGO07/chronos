@@ -64,7 +64,7 @@ pub fn pci_config_read_u16(addr: PciAddress, offset: u8) -> u16 {
 pub fn pci_config_read_u32(addr: PciAddress, offset: u8) -> u32 {
     unsafe {
         if MCFG_ADDRESS != 0 {
-            core::ptr::read_volatile(addr.mmio_config_address(offset))
+            crate::utils::asm::mmio::read(addr.mmio_config_address(offset) as u64, 4) as u32
         } else {
             #[cfg(target_arch = "x86_64")]
             {
@@ -100,7 +100,11 @@ pub fn pci_config_write_u16(addr: PciAddress, offset: u8, value: u16) {
 pub fn pci_config_write_u32(addr: PciAddress, offset: u8, value: u32) {
     unsafe {
         if MCFG_ADDRESS != 0 {
-            core::ptr::write_volatile(addr.mmio_config_address(offset), value);
+            crate::utils::asm::mmio::write(
+                addr.mmio_config_address(offset) as u64,
+                value as u64,
+                4,
+            );
         } else {
             #[cfg(target_arch = "x86_64")]
             {
