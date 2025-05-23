@@ -40,7 +40,6 @@ Contributors are welcome.
 - Utilize all cpu cores
 - NVMe
 - USB
-- Userspace
 - ELF loading
 - Interrupts, MMU and preemptive scheduler on aarch64
 

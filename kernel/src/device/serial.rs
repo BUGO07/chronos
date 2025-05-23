@@ -107,7 +107,6 @@ pub fn serial_thread() -> ! {
                 crate::warn!("shell not initialized");
             }
         }
-        crate::utils::asm::halt();
     }
 }
 

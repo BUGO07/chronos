@@ -12,12 +12,16 @@ use crate::{
 
 pub mod vmm;
 
-pub const STACK_SIZE: usize = 64 * 1024;
-pub static STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+pub const KERNEL_STACK_SIZE: usize = 64 * 1024;
+pub static KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
+
+pub const USER_STACK_SIZE: usize = 64 * 1024;
+pub const USER_STACK_BASE: usize = 0x800000;
 
 #[global_allocator]
 pub static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
-    Talc::new(unsafe { ClaimOnOom::new(Span::from_array((&raw const STACK).cast_mut())) }).lock();
+    Talc::new(unsafe { ClaimOnOom::new(Span::from_array((&raw const KERNEL_STACK).cast_mut())) })
+        .lock();
 
 pub struct TotalMemory {
     usable_bytes: u64,

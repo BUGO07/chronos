@@ -12,7 +12,7 @@ use core::{
 };
 
 use crate::{
-    memory::STACK_SIZE,
+    memory::{KERNEL_STACK_SIZE, USER_STACK_SIZE},
     utils::{limine::get_hhdm_offset, spinlock::SpinLock},
 };
 use alloc::{
@@ -112,7 +112,7 @@ impl Process {
     }
 
     pub fn next_stack_address(&mut self) -> u64 {
-        self.next_stack_addr -= STACK_SIZE as u64;
+        self.next_stack_addr -= USER_STACK_SIZE as u64;
         self.next_stack_addr
     }
 }
@@ -157,12 +157,14 @@ pub fn schedule(regs: *mut StackFrame) {
                     unsafe {
                         alloc::alloc::dealloc(
                             t.kstack as *mut u8,
-                            Layout::from_size_align(STACK_SIZE, 0x8).unwrap(),
+                            Layout::from_size_align(KERNEL_STACK_SIZE, 0x8).unwrap(),
                         );
-                        alloc::alloc::dealloc(
-                            (t.ustack + get_hhdm_offset()) as *mut u8,
-                            Layout::from_size_align(STACK_SIZE, 0x8).unwrap(),
-                        );
+                        if t.ustack != 0 {
+                            alloc::alloc::dealloc(
+                                (t.ustack + get_hhdm_offset()) as *mut u8,
+                                Layout::from_size_align(USER_STACK_SIZE, 0x8).unwrap(),
+                            );
+                        }
                     };
                 }
                 Status::Blocked => {
