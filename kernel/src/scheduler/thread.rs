@@ -6,14 +6,17 @@
 use core::{alloc::Layout, arch::asm, cell::OnceCell, fmt::Debug};
 
 use crate::{
-    memory::vmm::{flag, page_size},
+    memory::{
+        USER_STACK_SIZE,
+        vmm::{flag, page_size},
+    },
     utils::{limine::get_hhdm_offset, spinlock::SpinLock},
 };
 use alloc::sync::{Arc, Weak};
 
 use crate::{
     arch::{drivers::time::preferred_timer_ns, interrupts::StackFrame},
-    memory::STACK_SIZE,
+    memory::KERNEL_STACK_SIZE,
     utils::asm::halt_loop,
 };
 
@@ -94,32 +97,45 @@ impl Thread {
         tid: u64,
     ) -> Self {
         let kstack = unsafe {
-            alloc::alloc::alloc(Layout::from_size_align(STACK_SIZE, 0x8).unwrap()) as u64
-        };
-        let ustack = unsafe {
-            alloc::alloc::alloc(Layout::from_size_align(STACK_SIZE, 0x8).unwrap()) as u64
-                - get_hhdm_offset()
+            alloc::alloc::alloc(Layout::from_size_align(KERNEL_STACK_SIZE, 0x8).unwrap()) as u64
         };
 
-        unsafe { proc.force_unlock() };
-        let mut locked = proc.lock();
-        let next_addr = locked.next_stack_address() as usize;
-        for i in (next_addr..(next_addr + STACK_SIZE)).step_by(page_size::SMALL as usize) {
-            locked.pagemap.lock().map(
-                ustack + i as u64,
-                ustack,
-                flag::RW | flag::USER,
-                page_size::SMALL,
-            );
+        let mut ustack: u64 = 0;
+
+        if user {
+            let phys = unsafe {
+                alloc::alloc::alloc(Layout::from_size_align(USER_STACK_SIZE, 0x8).unwrap()) as u64
+                    - get_hhdm_offset()
+            };
+            unsafe { proc.force_unlock() };
+            let mut locked = proc.lock();
+            ustack = locked.next_stack_address();
+            for i in (0..USER_STACK_SIZE).step_by(page_size::SMALL as usize) {
+                locked.pagemap.lock().map(
+                    ustack + i as u64,
+                    phys + i as u64,
+                    flag::RW | flag::USER,
+                    page_size::SMALL,
+                );
+            }
         }
-        let mut thread = Self {
+
+        Self {
             name,
             tid,
             kstack,
             ustack,
             regs: StackFrame {
                 #[cfg(target_arch = "x86_64")]
-                rsp: if user { ustack } else { kstack } + STACK_SIZE as u64, // ! fix
+                cs: if user { 0x20 | 0x03 } else { 0x08 },
+                #[cfg(target_arch = "x86_64")]
+                ss: if user { 0x28 | 0x03 } else { 0x10 },
+                #[cfg(target_arch = "x86_64")]
+                rsp: if user {
+                    ustack + USER_STACK_SIZE as u64
+                } else {
+                    kstack + KERNEL_STACK_SIZE as u64
+                },
                 #[cfg(target_arch = "x86_64")]
                 rip: func as u64,
                 // #[cfg(target_arch = "x86_64")]
@@ -131,7 +147,7 @@ impl Thread {
 
                 // TODO: implement aarch64 properly
                 #[cfg(target_arch = "aarch64")]
-                sp: kstack + STACK_SIZE as u64,
+                sp: kstack + KERNEL_STACK_SIZE as u64,
                 #[cfg(target_arch = "aarch64")]
                 pc: func,
                 #[cfg(target_arch = "aarch64")]
@@ -142,15 +158,7 @@ impl Thread {
             status: Status::Ready,
             runtime: 0,
             schedule_time: 0,
-        };
-
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            asm!("mov {0:x}, cs", out(reg) thread.regs.cs, options(nomem, nostack, preserves_flags));
-            asm!("mov {0:x}, ss", out(reg) thread.regs.ss, options(nomem, nostack, preserves_flags));
         }
-
-        thread
     }
 
     pub fn get_name(&self) -> &'static str {

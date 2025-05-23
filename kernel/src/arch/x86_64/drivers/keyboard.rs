@@ -52,6 +52,5 @@ pub fn keyboard_thread() -> ! {
                 }
             }
         }
-        crate::utils::asm::halt();
     }
 }

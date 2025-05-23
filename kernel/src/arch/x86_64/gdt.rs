@@ -3,17 +3,17 @@
     Released under EUPL 1.2 License
 */
 
-use core::arch::asm;
+use core::{alloc::Layout, arch::asm};
 
-use crate::{debug, info};
+use crate::{info, memory::KERNEL_STACK_SIZE};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
 pub struct SegmentSelector(pub u16);
 
 impl SegmentSelector {
-    pub const fn new(index: u16, table_indicator: u8) -> Self {
-        SegmentSelector((index << 3) | ((table_indicator as u16) << 2))
+    pub const fn new(index: u16, table_indicator: u8, ring: u8) -> Self {
+        SegmentSelector((index << 3) | ((table_indicator as u16) << 2) | (ring as u16))
     }
 }
 
@@ -36,7 +36,7 @@ pub struct GdtEntry {
 }
 
 impl GdtEntry {
-    const fn missing() -> Self {
+    const fn null() -> Self {
         GdtEntry {
             limit_low: 0,
             base_low: 0,
@@ -46,48 +46,97 @@ impl GdtEntry {
             base_high: 0,
         }
     }
-
-    const fn kernel_code_segment() -> Self {
-        const ACCESS_KERNEL_CODE: u8 = 0b1001_1010;
-        const GRANULARITY_4KB: u8 = 0b0010_0000;
-
+    const fn kernel_code() -> Self {
         GdtEntry {
             limit_low: 0,
             base_low: 0,
             base_middle: 0,
-            access: ACCESS_KERNEL_CODE,
-            granularity: GRANULARITY_4KB,
+            access: 0b1001_1010,
+            granularity: 0b0010_0000,
             base_high: 0,
         }
     }
-
-    const fn kernel_data_segment() -> Self {
-        const ACCESS_KERNEL_DATA: u8 = 0b1001_0010;
-        const GRANULARITY_4KB: u8 = 0b0000_0000;
-
+    const fn kernel_data() -> Self {
         GdtEntry {
             limit_low: 0,
             base_low: 0,
             base_middle: 0,
-            access: ACCESS_KERNEL_DATA,
-            granularity: GRANULARITY_4KB,
+            access: 0b1001_0010,
+            granularity: 0b0010_0000,
             base_high: 0,
         }
     }
+    const fn user_code_32bit() -> Self {
+        GdtEntry {
+            limit_low: 0,
+            base_low: 0,
+            base_middle: 0,
+            access: 0b1111_1010,
+            granularity: 0b0100_0000,
+            base_high: 0,
+        }
+    }
+    const fn user_code() -> Self {
+        GdtEntry {
+            limit_low: 0,
+            base_low: 0,
+            base_middle: 0,
+            access: 0b1111_1010,
+            granularity: 0b0010_0000,
+            base_high: 0,
+        }
+    }
+    const fn user_data() -> Self {
+        GdtEntry {
+            limit_low: 0,
+            base_low: 0,
+            base_middle: 0,
+            access: 0b1111_0010,
+            granularity: 0b0010_0000,
+            base_high: 0,
+        }
+    }
+}
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C, packed)]
+pub struct TssEntry {
+    limit_low: u16,
+    base_low: u16,
+    base_middle_low: u8,
+    access: u8,
+    granularity: u8,
+    base_middle_high: u8,
+    base_high: u32,
+    reserved: u32,
+}
+
+impl TssEntry {
+    const fn null() -> Self {
+        TssEntry {
+            limit_low: 0,
+            base_low: 0,
+            base_middle_low: 0,
+            access: 0,
+            granularity: 0,
+            base_middle_high: 0,
+            base_high: 0,
+            reserved: 0,
+        }
+    }
     fn tss_segment(tss: &'static TaskStateSegment) -> Self {
         let base = &raw const *tss as u64;
         let limit = size_of::<TaskStateSegment>() as u32 - 1;
-        const ACCESS_TSS: u8 = 0b1000_1001;
-        const GRANULARITY_TSS: u8 = 0b0000_0000;
 
-        GdtEntry {
+        TssEntry {
             limit_low: limit as u16,
             base_low: base as u16,
-            base_middle: (base >> 16) as u8,
-            access: ACCESS_TSS,
-            granularity: GRANULARITY_TSS,
-            base_high: (base >> 24) as u8,
+            base_middle_low: (base >> 16) as u8,
+            access: 0b1000_1001,
+            granularity: 0b0000_0000,
+            base_middle_high: (base >> 24) as u8,
+            base_high: (base >> 32) as u32,
+            reserved: 0,
         }
     }
 }
@@ -98,8 +147,10 @@ pub struct GlobalDescriptorTable {
     null: GdtEntry,
     kernel_code: GdtEntry,
     kernel_data: GdtEntry,
-    tss_low: GdtEntry,
-    tss_high: GdtEntry,
+    user_code_32bit: GdtEntry,
+    user_code: GdtEntry,
+    user_data: GdtEntry,
+    tss: TssEntry,
 }
 
 impl Default for GlobalDescriptorTable {
@@ -111,11 +162,13 @@ impl Default for GlobalDescriptorTable {
 impl GlobalDescriptorTable {
     pub const fn new() -> Self {
         GlobalDescriptorTable {
-            null: GdtEntry::missing(),
-            kernel_code: GdtEntry::kernel_code_segment(),
-            kernel_data: GdtEntry::kernel_data_segment(),
-            tss_low: GdtEntry::missing(),
-            tss_high: GdtEntry::missing(),
+            null: GdtEntry::null(),
+            kernel_code: GdtEntry::kernel_code(),
+            kernel_data: GdtEntry::kernel_data(),
+            user_code_32bit: GdtEntry::user_code_32bit(),
+            user_code: GdtEntry::user_code(),
+            user_data: GdtEntry::user_data(),
+            tss: TssEntry::null(),
         }
     }
 }
@@ -138,22 +191,20 @@ pub struct TaskStateSegment {
     reserved2: u64,
     reserved3: u16,
     io_map_base_address: u16,
-    interrupt_stack_table: [u64; 7],
 }
 
 lazy_static::lazy_static! {
-    static ref TSS: TaskStateSegment = {
-        let mut tss = TaskStateSegment::default();
-        tss.interrupt_stack_table[0] = {
-            let stack_start = &raw const crate::memory::STACK as u64;
-            stack_start + crate::memory::STACK_SIZE as u64
-        };
-        tss
+    static ref TSS: TaskStateSegment = TaskStateSegment {
+        rsp0: unsafe {
+            alloc::alloc::alloc(Layout::from_size_align(KERNEL_STACK_SIZE, 0x8).unwrap()) as u64
+                + crate::memory::KERNEL_STACK_SIZE as u64
+        },
+        ..Default::default()
     };
 
     static ref GDT: GlobalDescriptorTable = {
         let mut gdt = GlobalDescriptorTable::new();
-        gdt.tss_low = GdtEntry::tss_segment(&TSS);
+        gdt.tss = TssEntry::tss_segment(&TSS);
         gdt
     };
 
@@ -164,49 +215,54 @@ lazy_static::lazy_static! {
 
     static ref SELECTORS: Selectors = {
         Selectors {
-            code_selector: SegmentSelector::new(1, 0),
-            data_selector: SegmentSelector::new(2, 0),
-            tss_selector: SegmentSelector::new(3, 0),
+            kernel_code: SegmentSelector::new(1, 0, 0),
+            kernel_data: SegmentSelector::new(2, 0, 0),
+            _user_code_32bit: SegmentSelector::new(3, 0, 3),
+            _user_code: SegmentSelector::new(4, 0, 3),
+            _user_data: SegmentSelector::new(5, 0, 3),
+            tss: SegmentSelector::new(6, 0, 0),
         }
     };
 }
 
 struct Selectors {
-    code_selector: SegmentSelector,
-    data_selector: SegmentSelector,
-    tss_selector: SegmentSelector,
+    kernel_code: SegmentSelector,
+    kernel_data: SegmentSelector,
+    _user_code_32bit: SegmentSelector,
+    _user_code: SegmentSelector,
+    _user_data: SegmentSelector,
+    tss: SegmentSelector,
 }
 
 pub fn init() {
     unsafe {
         info!("loading gdt");
-        asm!("lgdt [{}]", in(reg) &raw const *GDT_PTR, options(readonly, nostack, preserves_flags));
-
-        debug!("loading code segment");
         asm!(
-            "push {sel:r}",
-            "lea {tmp}, [55f + rip]",
-            "push {tmp}",
+            "mov rdi, {ptr}",
+            "lgdt [rdi]",
+            "mov rsi, {data:r}",
+            "mov ss, si",
+            "mov si, 0",
+            "mov ds, si",
+            "mov fs, si",
+            "mov es, si",
+            "mov gs, si",
+            "mov rdx, {code:r}",
+            "push rdx",
+            "lea rax, [rip + 55f]",
+            "push rax",
             "retfq",
             "55:",
-            sel = in(reg) SELECTORS.code_selector.0,
-            tmp = lateout(reg) _,
-            options(preserves_flags),
+            ptr = in(reg) &raw const *GDT_PTR,
+            data = in(reg) SELECTORS.kernel_data.0,
+            code = in(reg) SELECTORS.kernel_code.0,
+            options(nostack)
         );
-
-        debug!("loading tss");
-        asm!("ltr {0:x}", in(reg) SELECTORS.tss_selector.0, options(nostack, preserves_flags));
-
-        debug!("loading data segments");
-        let data = SELECTORS.data_selector.0;
+        info!("loading tss");
         asm!(
-            "mov ds, {0:x}",
-            "mov es, {0:x}",
-            "mov fs, {0:x}",
-            "mov gs, {0:x}",
-            "mov ss, {0:x}",
-            in(reg) data,
-            options(nostack, preserves_flags)
-        );
+            "ltr {tss:x}",
+            tss = in(reg) SELECTORS.tss.0,
+            options(nostack)
+        )
     }
 }

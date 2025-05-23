@@ -39,7 +39,6 @@ pub fn shell_thread() -> ! {
         if let Some((dc, keyboard_state)) = shell.event_queue.pop_front() {
             shell.key_event(dc, keyboard_state);
         }
-        crate::utils::asm::halt();
     }
 }
 
@@ -54,7 +53,6 @@ pub fn cursor_thread() -> ! {
         }
         visible = !visible && unsafe { !RUNNING_RTC };
         crate::scheduler::thread::sleep_ms(500);
-        crate::utils::asm::halt();
     }
 }
 
