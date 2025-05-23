@@ -165,6 +165,32 @@ pub fn main_thread() -> ! {
     scheduler::thread::spawn(shell_proc, shell_thread as usize, "main", false);
     scheduler::thread::spawn(shell_proc, cursor_thread as usize, "cursor", false);
 
+    // * loading userspace binary
+    // let addr =
+    //     unsafe { alloc::alloc::alloc_zeroed(Layout::from_size_align(0x1000, 0x1000).unwrap()) }
+    //         as u64;
+    // let phys = addr - get_hhdm_offset();
+    // let virt = 0x40000000;
+
+    // let func = include_bytes!("../../res/binary");
+
+    // unsafe {
+    //     PAGEMAP.get().unwrap().lock().map(
+    //         virt as u64,
+    //         phys,
+    //         flag::RW | flag::USER,
+    //         page_size::SMALL,
+    //     )
+    // };
+
+    // memcpy(
+    //     addr as *mut c_void,
+    //     func.as_ptr() as *const c_void,
+    //     func.len(),
+    // );
+
+    // scheduler::thread::spawn(shell_proc, virt, "userbin", true);
+
     halt_loop()
 }
 
