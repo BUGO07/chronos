@@ -5,6 +5,8 @@
 
 use core::arch::asm;
 
+use crate::info;
+
 pub mod pic;
 
 #[repr(C)]
@@ -213,6 +215,20 @@ extern "C" fn isr_handler(regs: *mut StackFrame) {
             );
         }
 
+        if registers.vector == 0x80 {
+            let id = registers.rax;
+            let arg0 = registers.rdi;
+            let arg1 = registers.rsi;
+            let arg2 = registers.rdx;
+            let arg3 = registers.r10;
+            let arg4 = registers.r8;
+            let arg5 = registers.r9;
+            info!(
+                "syscall {} with args {} {} {} {} {} {}",
+                id, arg0, arg1, arg2, arg3, arg4, arg5
+            );
+        }
+
         if let Some(handler) = HANDLERS[registers.vector as usize] {
             handler(regs);
         }
@@ -227,7 +243,11 @@ pub fn init() {
     let table = &raw const isr_table;
     unsafe {
         for (i, entry) in IDT.iter_mut().enumerate() {
-            entry.set(*table.add(i), None, None);
+            entry.set(
+                *table.add(i),
+                if i == 0x80 { Some(0xEE) } else { Some(0x8E) },
+                None,
+            );
         }
         IDTR.base = IDT.as_ptr() as u64;
 
