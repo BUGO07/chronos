@@ -22,6 +22,7 @@ Contributors are welcome.
 - ACPI
 - Basic PCI
 - Basic Shell
+- Basic RAM FS
 
 ### aarch64 (arm64)
 
@@ -31,41 +32,43 @@ Contributors are welcome.
 - Memory Allocator (no pagemap yet)
 - Cooperative Scheduler
 - Basic Shell (input via serial)
+- Basic RAM FS
 
 ## TODO:
 
-- Utilize all cpus
-- VFS
+- Proper build system insteaad of just `make`
+- Utilize all cpu cores
+- NVMe
 - USB
 - Userspace
+- ELF loading
 - Interrupts, MMU and preemptive scheduler on aarch64
 
 ## Known Bugs/Issues
 
 - Address overflow in vmm on my laptop in debug builds.
 - Crash on my laptop when setting the pagetable (this is fixed by hardsetting the pagesize to LARGE).
-- No way to wake up from sleep yet.
+- No way to wake up from S3 sleep yet.
 - Using the keyboard before `up and running` makes keyboard and mouse not work
 
 ## Building And Running
 
 Make sure you have the following installed:
-* Rust
-* Clang
-* Make
-* QEMU x86_64 | aarch64
-* Xorriso
+* `rust`
+* `clang`
+* `make`
+* `qemu`
+* `xorriso`
 
-You will also need `aarch64-linux-gnu-gcc` to cross-compile c libraries
-
-Follow these steps to build and run the os
+Follow these steps to build and run the OS:
 1. Clone this repo with:\
 ``git clone --recursive --depth=1 https://github.com/BUGO07/chronos``
 
 2. Go to the root directory of cloned repo and run:\
-``make run`` For running debug mode\
-``RUST_PROFILE="release" make run`` For running release mode\
-``RUST_PROFILE="smol" make run`` For optimizing for size\
-``make test`` For running tests
+``make run`` For running\
+``make test`` For tests\
+``make uacpi-test`` For measuring [uACPI](https://github.com/uACPI/uACPI) score
 
-Change the KARCH environment variable to run `x86_64` (default) or `aarch64` (arm64) architectures (no tests for it yet)
+Environment variables:\
+RUST_PROFILE - changes the rust build profile - `dev`/`release`/`smol` - default=`dev`\
+KARCH - changes the target architecture - `x86_64`/`aarch64` - default=`x86_64`

@@ -64,15 +64,33 @@ pub fn _start() -> ! {
     self::system::cpu::init();
     self::drivers::mouse::init();
     crate::device::pci::pci_enumerate();
+    let pci_devices = unsafe { &crate::device::pci::PCI_DEVICES };
+    info!("Found {} PCI devices:", pci_devices.len());
+    for device in pci_devices {
+        info!(
+            "{:02x}:{:02x}:{} {} {:04X}:{:04X} [0x{:X}:0x{:X}:0x{:X}]",
+            device.address.bus,
+            device.address.device,
+            device.address.function,
+            device.name,
+            device.vendor_id,
+            device.device_id,
+            device.class_code,
+            device.subclass,
+            device.prog_if,
+        );
+    }
+    crate::device::nvme::init();
 
     #[cfg(feature = "tests")]
     crate::tests::init();
 
     scheduler::init();
     scheduler::thread::spawn(
-        scheduler::get_scheduler().pid0.get().unwrap(),
+        scheduler::get_proc_by_pid(0).unwrap(),
         main_thread as usize,
         "main",
+        false,
     );
     scheduler::start();
 }
@@ -105,11 +123,10 @@ pub fn main_thread() -> ! {
                 .clamp(-720, 840) as i16,
         )
         .adjusted_for_timezone();
-
     info!(
         "{} | {}",
         rtc_time.datetime_pretty(),
-        rtc_time.timezone_pretty()
+        rtc_time.timezone_pretty(),
     );
 
     info!("rocking a(n) {}", crate::utils::asm::get_cpu());
@@ -135,29 +152,24 @@ pub fn main_thread() -> ! {
 
     info!("icl ts pmo ♥");
 
-    let sched = scheduler::get_scheduler();
+    let pid0 = scheduler::get_proc_by_pid(0).unwrap();
 
-    let pid0 = sched.pid0.get().unwrap();
-
-    scheduler::thread::spawn(pid0, keyboard_thread as usize, "keyboard");
-    scheduler::thread::spawn(pid0, serial_thread as usize, "serial");
+    scheduler::thread::spawn(pid0, keyboard_thread as usize, "keyboard", false);
+    scheduler::thread::spawn(pid0, serial_thread as usize, "serial", false);
 
     let shell_pid = scheduler::spawn_process(
         unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
         "shell",
     );
-    let shell_proc = sched
-        .processes
-        .iter()
-        .find(|p| p.lock().get_pid() == shell_pid)
-        .unwrap();
-    scheduler::thread::spawn(shell_proc, shell_thread as usize, "main");
-    scheduler::thread::spawn(shell_proc, cursor_thread as usize, "cursor");
+    let shell_proc = scheduler::get_proc_by_pid(shell_pid).unwrap();
+    scheduler::thread::spawn(shell_proc, shell_thread as usize, "main", false);
+    scheduler::thread::spawn(shell_proc, cursor_thread as usize, "cursor", false);
 
     halt_loop()
 }
 
 pub fn _panic(info: &PanicInfo) -> ! {
+    crate::utils::asm::toggle_ints(false);
     #[cfg(feature = "tests")]
     {
         println!("[failed]\n");
@@ -166,7 +178,7 @@ pub fn _panic(info: &PanicInfo) -> ! {
     }
     #[cfg(not(feature = "tests"))]
     {
-        print!("{}", crate::utils::logger::color::RED);
+        print!("\x1b[2J{}", crate::utils::logger::color::RED);
         print_centered!(NOOO);
         println!();
         print_fill!("~", "Kernel Panic");
@@ -259,7 +271,6 @@ pub fn _panic(info: &PanicInfo) -> ! {
         );
         print_fill!("~", "", false);
         print!("{}", crate::utils::logger::color::RESET);
-        crate::utils::asm::toggle_ints(false);
     }
     halt_loop()
 }

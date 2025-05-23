@@ -3,19 +3,14 @@
     Released under EUPL 1.2 License
 */
 
-use core::{cell::OnceCell, sync::atomic::Ordering};
+use core::cell::OnceCell;
 
 use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
 
-use crate::{
-    arch::drivers::time,
-    drivers::acpi,
-    print, println,
-    utils::{logger::color, time::KernelTimer},
-};
+use crate::{arch::drivers::time, drivers::acpi, print, println, utils::logger::color};
 
 #[cfg(target_arch = "x86_64")]
 use alloc::collections::vec_deque::VecDeque;
@@ -52,7 +47,6 @@ pub fn shell_thread() -> ! {
 pub fn cursor_thread() -> ! {
     let mut visible = true;
     loop {
-        // blinking cursor
         if visible {
             print!("\x1b[?25h");
         } else {
@@ -269,6 +263,7 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             time [digits] - current time given from all the timers\n    \
             date [timezone] - current date given from the RTC\n    \
             rtc [timezone] - does the same as `date` but infinite loop (unless stopped by ESC)\n    \
+            epoch [timezone] - does the same as `rtc` but gives epoch timestamp instead\n    \
             clear - clears the screen\n    \
             color [x] changes the color of the terminal (like windows or use hex)\n    \
             bg [x] changes the background of the terminal (like windows or use hex)\n    \
@@ -292,43 +287,14 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             } else {
                 5
             };
-            #[cfg(target_arch = "x86_64")]
-            {
-                println!("PIT - {}", time::pit::elapsed_pretty(digits));
-                if time::TIMERS_INIT_STATE.load(Ordering::Relaxed) >= 4 {
-                    unsafe {
-                        let kvm = time::kvm::KVM_TIMER
-                            .get()
-                            .expect("couldn't access kvm timer");
-                        let tsc = time::tsc::TSC_TIMER
-                            .get()
-                            .expect("couldn't access tsc timer");
-                        let hpet = time::hpet::HPET_TIMER
-                            .get()
-                            .expect("couldn't access hpet timer");
-                        if kvm.is_supported() {
-                            println!("KVM - {}", kvm.elapsed_pretty(digits));
-                        }
-                        if tsc.is_supported() {
-                            println!("TSC - {}", tsc.elapsed_pretty(digits));
-                        }
-                        if hpet.is_supported() {
-                            println!("HPET- {}", hpet.elapsed_pretty(digits));
-                        }
-                    }
-                }
-            }
-            #[cfg(target_arch = "aarch64")]
-            {
-                if time::TIMERS_INIT_STATE.load(Ordering::Relaxed) >= 1 {
-                    let generic = unsafe {
-                        time::generic::GENERIC_TIMER
-                            .get()
-                            .expect("couldn't access generic timer")
-                    };
-                    if generic.is_supported() {
-                        println!("Generic - {}", generic.elapsed_pretty(digits));
-                    }
+            for timer in time::get_timers().iter() {
+                if timer.is_supported() {
+                    println!(
+                        "{}{}- {}",
+                        timer.name,
+                        if timer.name.len() == 4 { "" } else { " " },
+                        timer.elapsed_pretty(digits)
+                    );
                 }
             }
         }
@@ -396,15 +362,75 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                 todo!()
             }
         }
+        "epoch" => {
+            #[cfg(target_arch = "x86_64")]
+            {
+                unsafe { RUNNING_RTC = true };
+                loop {
+                    if let Some((dc, keyboard_state)) =
+                        unsafe { SHELL.get_mut().unwrap().event_queue.pop_front() }
+                    {
+                        if dc == DecodedKey::Unicode(0x1B as char) {
+                            println!();
+                            unsafe { RUNNING_RTC = false };
+                            break;
+                        }
+                        match keyboard_state.keys_down.as_slice() {
+                            [KeyCode::LControl, KeyCode::C] | [KeyCode::Escape] => {
+                                println!();
+                                unsafe { RUNNING_RTC = false };
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                    let default_zone = crate::utils::config::get_config().timezone_offset.to_int();
+                    let zone = if args.is_empty() {
+                        default_zone
+                    } else {
+                        args[0].parse().unwrap_or(default_zone)
+                    };
+
+                    let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
+                        .with_timezone_offset(zone.clamp(-720, 840) as i16)
+                        .adjusted_for_timezone();
+                    print!(
+                        "\x1b[2K\r{} | {}",
+                        rtc_time.to_epoch().unwrap(),
+                        rtc_time.timezone_pretty()
+                    );
+                    crate::scheduler::thread::sleep_ms(100);
+                    crate::utils::asm::halt();
+                }
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                todo!()
+            }
+        }
         "clear" => {
             print!("\x1b[2J\x1b[H");
         }
+        "lspci" => {
+            crate::device::pci::pci_enumerate();
+            for device in unsafe { &crate::device::pci::PCI_DEVICES } {
+                println!(
+                    "{:02x}:{:02x}:{} {} {:04X}:{:04X} [0x{:X}:0x{:X}:0x{:X}]",
+                    device.address.bus,
+                    device.address.device,
+                    device.address.function,
+                    device.name,
+                    device.vendor_id,
+                    device.device_id,
+                    device.class_code,
+                    device.subclass,
+                    device.prog_if,
+                );
+            }
+        }
         #[cfg(target_arch = "x86_64")]
         "pwd" => {
-            let cwd = crate::scheduler::get_scheduler()
-                .processes
-                .iter()
-                .find(|x| x.lock().get_name() == "shell")
+            let cwd = crate::scheduler::current_process()
                 .unwrap()
                 .lock()
                 .get_cwd()
@@ -413,31 +439,34 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
         }
         #[cfg(target_arch = "x86_64")]
         "cd" => {
+            let cwd = crate::scheduler::current_process()
+                .unwrap()
+                .lock()
+                .get_cwd()
+                .clone();
             let path = if args.is_empty() {
                 fs::Path::new("/home")
             } else {
                 let p = fs::Path::new(args[0]);
-                if fs::get_vfs().resolve_path(p.clone()).is_some() {
-                    p
+                if let Some(new_p) = fs::get_vfs()
+                    .resolve_path(cwd.clone())
+                    .unwrap()
+                    .resolve_path(p.clone())
+                {
+                    new_p.get_path().clone()
                 } else {
-                    fs::Path::new("/home")
+                    println!("cd: {}: No such file or directory", p);
+                    return;
                 }
             };
-            println!("{path}");
-            crate::scheduler::get_scheduler()
-                .processes
-                .iter()
-                .find(|x| x.lock().get_name() == "shell")
+            crate::scheduler::current_process()
                 .unwrap()
                 .lock()
                 .set_cwd(path);
         }
         #[cfg(target_arch = "x86_64")]
         "ls" => {
-            let cwd = crate::scheduler::get_scheduler()
-                .processes
-                .iter()
-                .find(|x| x.lock().get_name() == "shell")
+            let cwd = crate::scheduler::current_process()
                 .unwrap()
                 .lock()
                 .get_cwd()
@@ -445,7 +474,17 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             let path = if args.is_empty() {
                 cwd.clone()
             } else {
-                fs::Path::new(args[0])
+                let p = fs::Path::new(args[0]);
+                if let Some(new_p) = fs::get_vfs()
+                    .resolve_path(cwd.clone())
+                    .unwrap()
+                    .resolve_path(p.clone())
+                {
+                    new_p.get_path().clone()
+                } else {
+                    println!("cd: {}: No such file or directory", p);
+                    return;
+                }
             };
             let vfs = unsafe { fs::VFS.get_mut().unwrap() };
             for child in vfs
@@ -474,21 +513,99 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                 println!("mkdir: what name dumass");
                 return;
             }
-            let vfs = unsafe { fs::VFS.get_mut().unwrap() };
             for arg in args {
-                vfs.resolve_path_mut(
-                    crate::scheduler::get_scheduler()
-                        .processes
-                        .iter()
-                        .find(|x| x.lock().get_name() == "shell")
+                unsafe {
+                    fs::VFS
+                        .get_mut()
+                        .unwrap()
+                        .resolve_path_mut(
+                            crate::scheduler::current_process()
+                                .unwrap()
+                                .lock()
+                                .get_cwd()
+                                .clone(),
+                        )
+                        .unwrap()
+                        .create_dir(arg)
+                        .unwrap();
+                }
+            }
+        }
+        #[cfg(target_arch = "x86_64")]
+        "touch" => {
+            if args.is_empty() {
+                println!("touch: what name dumass");
+                return;
+            }
+            for arg in args {
+                unsafe {
+                    fs::VFS
+                        .get_mut()
+                        .unwrap()
+                        .resolve_path_mut(
+                            crate::scheduler::current_process()
+                                .unwrap()
+                                .lock()
+                                .get_cwd()
+                                .clone(),
+                        )
+                        .unwrap()
+                        .create_file(arg)
+                        .unwrap();
+                }
+            }
+        }
+        #[cfg(target_arch = "x86_64")]
+        "cat" => {
+            if args.is_empty() {
+                println!("cat: what file dumass");
+                return;
+            }
+            let path = fs::Path::new(args[0]);
+            let vfs = unsafe { fs::VFS.get_mut().unwrap() };
+            if let Some(file) = vfs
+                .resolve_path(
+                    crate::scheduler::current_process()
                         .unwrap()
                         .lock()
                         .get_cwd()
                         .clone(),
                 )
                 .unwrap()
-                .create_dir(arg)
-                .unwrap();
+                .resolve_path(path.clone())
+            {
+                println!("{}", str::from_utf8(file.read().unwrap()).unwrap());
+            } else {
+                println!("cat: no such file");
+            }
+        }
+        #[cfg(target_arch = "x86_64")]
+        "rm" => {
+            if args.is_empty() {
+                println!("rm: what dumass");
+                return;
+            }
+            let path = fs::Path::new(args[0]);
+            if let Some(node) = unsafe {
+                fs::VFS
+                    .get_mut()
+                    .unwrap()
+                    .resolve_path_mut(
+                        crate::scheduler::current_process()
+                            .unwrap()
+                            .lock()
+                            .get_cwd()
+                            .clone(),
+                    )
+                    .unwrap()
+                    .resolve_path_mut(path.clone())
+            } {
+                node.get_parent_mut()
+                    .unwrap()
+                    .get_children_mut()
+                    .retain(|x| x.get_name() != path.get_name());
+            } else {
+                println!("rm: no such item");
             }
         }
         "color" => {

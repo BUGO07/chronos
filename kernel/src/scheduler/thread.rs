@@ -3,9 +3,12 @@
     Released under EUPL 1.2 License
 */
 
-use core::{alloc::Layout, arch::asm, cell::OnceCell};
+use core::{alloc::Layout, arch::asm, cell::OnceCell, fmt::Debug};
 
-use crate::utils::spinlock::SpinLock;
+use crate::{
+    memory::vmm::{flag, page_size},
+    utils::{limine::get_hhdm_offset, spinlock::SpinLock},
+};
 use alloc::sync::{Arc, Weak};
 
 use crate::{
@@ -28,29 +31,95 @@ pub enum Status {
 pub struct Thread {
     name: &'static str,
     tid: u64,
-    _kstack: u64,
+    pub kstack: u64,
+    pub ustack: u64,
     pub regs: StackFrame,
     parent: Weak<SpinLock<Process>>,
     status: Status,
+    pub runtime: u64,
+    pub schedule_time: u64,
+}
+
+impl Debug for Thread {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Thread")
+            .field("name", &self.name)
+            .field("tid", &self.tid)
+            .field("status", &self.status)
+            .field("runtime", &self.runtime)
+            .finish()
+    }
+}
+
+impl PartialEq for Thread {
+    fn eq(&self, _other: &Self) -> bool {
+        false
+    }
+}
+
+impl PartialOrd for Thread {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for Thread {}
+
+impl Ord for Thread {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        if self.runtime == 0 {
+            return core::cmp::Ordering::Greater;
+        }
+        self.runtime.cmp(&other.runtime)
+    }
 }
 
 unsafe impl Sync for Thread {}
 unsafe impl Send for Thread {}
 
 impl Thread {
-    pub fn new(proc: &'static Arc<SpinLock<Process>>, func: usize, name: &'static str) -> Self {
-        let tid = proc.lock().next_tid();
-        // debug!("spawning new thread {}", _tid);
-        let _kstack = unsafe {
+    pub fn new(
+        proc: &'static Arc<SpinLock<Process>>,
+        func: usize,
+        name: &'static str,
+        user: bool,
+    ) -> Self {
+        Self::new_with_tid(proc, func, name, user, proc.lock().next_tid())
+    }
+    pub fn new_with_tid(
+        proc: &'static Arc<SpinLock<Process>>,
+        func: usize,
+        name: &'static str,
+        user: bool,
+        tid: u64,
+    ) -> Self {
+        let kstack = unsafe {
             alloc::alloc::alloc(Layout::from_size_align(STACK_SIZE, 0x8).unwrap()) as u64
         };
+        let ustack = unsafe {
+            alloc::alloc::alloc(Layout::from_size_align(STACK_SIZE, 0x8).unwrap()) as u64
+                - get_hhdm_offset()
+        };
+
+        unsafe { proc.force_unlock() };
+        let mut locked = proc.lock();
+        let next_addr = locked.next_stack_address() as usize;
+        for i in (next_addr..(next_addr + STACK_SIZE)).step_by(page_size::SMALL as usize) {
+            locked.pagemap.lock().map(
+                ustack + i as u64,
+                ustack,
+                flag::RW | flag::USER,
+                page_size::SMALL,
+            );
+        }
         let mut thread = Self {
             name,
             tid,
-            _kstack,
+            kstack,
+            ustack,
             regs: StackFrame {
                 #[cfg(target_arch = "x86_64")]
-                rsp: _kstack + STACK_SIZE as u64,
+                rsp: if user { ustack } else { kstack } + STACK_SIZE as u64, // ! fix
                 #[cfg(target_arch = "x86_64")]
                 rip: func as u64,
                 // #[cfg(target_arch = "x86_64")]
@@ -62,7 +131,7 @@ impl Thread {
 
                 // TODO: implement aarch64 properly
                 #[cfg(target_arch = "aarch64")]
-                sp: _kstack + STACK_SIZE as u64,
+                sp: kstack + STACK_SIZE as u64,
                 #[cfg(target_arch = "aarch64")]
                 pc: func,
                 #[cfg(target_arch = "aarch64")]
@@ -71,6 +140,8 @@ impl Thread {
             },
             parent: Arc::downgrade(proc),
             status: Status::Ready,
+            runtime: 0,
+            schedule_time: 0,
         };
 
         #[cfg(target_arch = "x86_64")]
@@ -103,8 +174,13 @@ impl Thread {
     }
 }
 
-pub fn spawn(proc: &'static Arc<SpinLock<Process>>, func: usize, name: &'static str) -> u64 {
-    let thread = Arc::new(SpinLock::new(Thread::new(proc, func, name)));
+pub fn spawn(
+    proc: &'static Arc<SpinLock<Process>>,
+    func: usize,
+    name: &'static str,
+    user: bool,
+) -> u64 {
+    let thread = Arc::new(SpinLock::new(Thread::new(proc, func, name, user)));
     proc.lock().get_children_mut().push(thread.clone());
     let tid = thread.lock().get_tid();
     enqueue(thread);
@@ -112,13 +188,10 @@ pub fn spawn(proc: &'static Arc<SpinLock<Process>>, func: usize, name: &'static 
 }
 
 pub fn sleep(ns: u64) {
-    let wakeup_time = preferred_timer_ns() + ns;
-
-    if let Some(thread) = get_self() {
+    if let Some(thread) = current_thread() {
         let mut t = thread.lock();
-        t.set_status(Status::Sleeping(wakeup_time));
+        t.set_status(Status::Sleeping(preferred_timer_ns() + ns));
     }
-
     yld();
 }
 
@@ -137,14 +210,14 @@ pub fn yld() {
 }
 
 pub fn block() {
-    if let Some(thread) = get_self() {
+    if let Some(thread) = current_thread() {
         thread.lock().set_status(Status::Blocked);
         yld();
     }
 }
 
 pub fn wake(thread: &Arc<SpinLock<Thread>>) {
-    let mut t = thread.lock();
+    let mut t: crate::utils::spinlock::SpinLockGuard<'_, Thread> = thread.lock();
     if t.get_status() == &Status::Blocked {
         t.set_status(Status::Ready);
         enqueue(thread.clone());
@@ -152,7 +225,7 @@ pub fn wake(thread: &Arc<SpinLock<Thread>>) {
 }
 
 pub fn terminate() -> ! {
-    if let Some(thread) = get_self() {
+    if let Some(thread) = current_thread() {
         thread.lock().set_status(Status::Terminated);
         yld();
     }
@@ -163,14 +236,19 @@ pub fn idle0() -> &'static Arc<SpinLock<Thread>> {
     static mut IDLE: OnceCell<Arc<SpinLock<Thread>>> = OnceCell::new();
     unsafe {
         IDLE.get_or_init(|| {
-            let proc = get_scheduler().pid0.get().unwrap();
-            let t = Arc::new(SpinLock::new(Thread::new(proc, halt_loop as usize, "idle")));
+            let t = Arc::new(SpinLock::new(Thread::new_with_tid(
+                get_proc_by_pid(0).unwrap(),
+                halt_loop as usize,
+                "idle",
+                false,
+                99,
+            )));
             t.lock().set_status(Status::Ready);
             t
         })
     }
 }
 
-pub fn get_self() -> &'static mut Option<Arc<SpinLock<Thread>>> {
+pub fn current_thread() -> &'static mut Option<Arc<SpinLock<Thread>>> {
     &mut get_scheduler().current
 }

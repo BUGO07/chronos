@@ -3,7 +3,7 @@
     Released under EUPL 1.2 License
 */
 
-use core::ffi::CStr;
+use core::{ffi::CStr, ptr::null_mut};
 
 #[cfg(target_arch = "x86_64")]
 use crate::memory::vmm::{PAGEMAP, flag, page_size};
@@ -73,9 +73,39 @@ pub fn init() {
             Some(uacpi_sleepbtn_handler),
             core::ptr::null_mut(),
         );
+
+        // let bif: *mut uacpi_object = null_mut();
+
+        uacpi_find_devices(c"PNP0C0A".as_ptr(), Some(battery_callback), null_mut());
+        // let ret = uacpi_eval_simple_package(_node, c"_BIF".as_ptr(), &raw mut bif);
     }
 }
 
+static mut NEXT_BATTERY_ID: usize = 0;
+
+extern "C" fn battery_callback(
+    _: *mut ::core::ffi::c_void,
+    node: *mut uacpi_namespace_node,
+    _: uacpi_u32,
+) -> uacpi_iteration_decision {
+    let bif_status = unsafe { uacpi_namespace_node_find(node, c"_BIF".as_ptr(), null_mut()) };
+    let bst_status = unsafe { uacpi_namespace_node_find(node, c"_BST".as_ptr(), null_mut()) };
+
+    if bif_status != UACPI_STATUS_OK || bst_status != UACPI_STATUS_OK {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+
+    unsafe { NEXT_BATTERY_ID += 1 };
+
+    println!("found battery");
+    println!("next id {} - node - {:p}", unsafe { NEXT_BATTERY_ID }, node);
+
+    // auto obj = frg::construct<BatteryBusObject>(
+    // 	*kernelAlloc, next_battery_id++, node);
+    // async::detach_with_allocator(*kernelAlloc, obj->run());
+
+    UACPI_ITERATION_DECISION_CONTINUE
+}
 extern "C" fn uacpi_powerbtn_handler(_: uacpi_handle) -> uacpi_interrupt_ret {
     perform_power_action(PowerAction::Shutdown);
     UACPI_INTERRUPT_HANDLED

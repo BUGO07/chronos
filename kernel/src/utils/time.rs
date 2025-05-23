@@ -3,14 +3,53 @@
     Released under EUPL 1.2 License
 */
 
-pub trait KernelTimer {
-    fn name(&self) -> &'static str;
-    fn is_supported(&self) -> bool;
-    fn priority(&self) -> u8; // unused as of now
-    fn elapsed_ns(&self) -> u64;
+pub struct Timer {
+    pub name: &'static str,
+    pub start: u64,
+    pub frequency: u64,
+    pub supported: bool,
+    pub priority: u8,
+    pub elapsed_ns: fn(&Self) -> u64,
+    pub offset: u64,
+}
 
-    fn elapsed_pretty(&self, digits: u32) -> alloc::string::String {
-        elapsed_time_pretty(self.elapsed_ns(), digits)
+impl Timer {
+    pub fn new(
+        name: &'static str,
+        start: u64,
+        frequency: u64,
+        supported: bool,
+        priority: u8,
+        elapsed_ns: fn(&Self) -> u64,
+        offset: u64,
+    ) -> Self {
+        Self {
+            name,
+            start,
+            frequency,
+            supported,
+            priority,
+            elapsed_ns,
+            offset,
+        }
+    }
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+    pub fn is_supported(&self) -> bool {
+        self.supported
+    }
+    pub fn priority(&self) -> u8 {
+        self.priority
+    } // unused as of now
+    pub fn get_offset(&self) -> u64 {
+        self.offset
+    }
+    pub fn set_offset(&mut self, offset: u64) {
+        self.offset = offset;
+    }
+    pub fn elapsed_pretty(&self, digits: u32) -> alloc::string::String {
+        elapsed_time_pretty((self.elapsed_ns)(self), digits)
     }
 }
 
@@ -48,4 +87,32 @@ pub fn busywait_ns(ns: u64) {
 #[inline(always)]
 pub fn busywait_ms(ms: u64) {
     busywait_ns(ms * 1_000_000);
+}
+
+pub fn is_leap_year(year: u16) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+pub fn days_in_month(year: u16, month: u8) -> u32 {
+    match month {
+        1 => 31,
+        2 => {
+            if is_leap_year(year) {
+                29
+            } else {
+                28
+            }
+        }
+        3 => 31,
+        4 => 30,
+        5 => 31,
+        6 => 30,
+        7 => 31,
+        8 => 31,
+        9 => 30,
+        10 => 31,
+        11 => 30,
+        12 => 31,
+        _ => 0,
+    }
 }

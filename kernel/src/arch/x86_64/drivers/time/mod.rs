@@ -3,11 +3,12 @@
     Released under EUPL 1.2 License
 */
 
-use core::sync::atomic::{AtomicU8, Ordering};
-
 use alloc::string::String;
 
-use crate::utils::time::KernelTimer;
+use crate::{
+    info,
+    utils::{heapless::HeaplessVec, time::Timer},
+};
 
 pub mod hpet;
 pub mod kvm;
@@ -15,22 +16,31 @@ pub mod pit;
 pub mod rtc;
 pub mod tsc;
 
-pub static TIMERS_INIT_STATE: AtomicU8 = AtomicU8::new(0);
+pub static mut TIMERS: HeaplessVec<Timer, 4> = HeaplessVec::new();
 
 pub fn init() {
     pit::init();
-    TIMERS_INIT_STATE.store(1, Ordering::Relaxed);
     kvm::init();
-    TIMERS_INIT_STATE.store(2, Ordering::Relaxed);
     tsc::init();
-    TIMERS_INIT_STATE.store(3, Ordering::Relaxed);
     crate::arch::system::lapic::init();
-    TIMERS_INIT_STATE.store(4, Ordering::Relaxed);
 }
 
 pub fn init_hpet() {
     hpet::init();
-    TIMERS_INIT_STATE.store(5, Ordering::Relaxed);
+}
+
+pub fn register_timer(timer: Timer) {
+    info!("registering timer - {} [{}]", timer.name, timer.priority);
+    unsafe { TIMERS.push(timer).ok() };
+    get_timers().sort_by(|a, b| a.priority.cmp(&b.priority));
+}
+
+pub fn get_timers() -> &'static mut HeaplessVec<Timer, 4> {
+    unsafe { &mut TIMERS }
+}
+
+pub fn get_timer(name: &str) -> &mut Timer {
+    get_timers().iter_mut().find(|x| x.name == name).unwrap()
 }
 
 #[inline(always)]
@@ -39,33 +49,13 @@ pub fn preferred_timer_ms() -> u64 {
 }
 
 pub fn preferred_timer_ns() -> u64 {
-    unsafe {
-        let kvm = crate::arch::drivers::time::kvm::KVM_TIMER
-            .get()
-            .map(|t| t as &dyn KernelTimer);
-        let tsc = crate::arch::drivers::time::tsc::TSC_TIMER
-            .get()
-            .map(|t| t as &dyn KernelTimer);
-        let hpet = crate::arch::drivers::time::hpet::HPET_TIMER
-            .get()
-            .map(|t| t as &dyn KernelTimer);
-
-        let timers: [&Option<&dyn KernelTimer>; 3] = match TIMERS_INIT_STATE.load(Ordering::Relaxed)
-        {
-            5 => [&kvm, &tsc, &hpet],
-            3..=4 => [&kvm, &tsc, &None],
-            2 => [&kvm, &None, &None],
-            _ => [&None, &None, &None],
-        };
-
-        for timer in timers.into_iter().flatten() {
-            if timer.is_supported() {
-                return timer.elapsed_ns();
-            }
+    for timer in get_timers().iter() {
+        if timer.is_supported() {
+            return (timer.elapsed_ns)(timer);
         }
-
-        self::pit::current_pit_ticks() * 1_000_000
     }
+
+    self::pit::current_pit_ticks() * 1_000_000
 }
 
 #[inline(always)]

@@ -9,7 +9,7 @@ pub mod pic;
 
 #[repr(C)]
 #[repr(packed)]
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
 pub struct StackFrame {
     pub r15: u64,
     pub r14: u64,

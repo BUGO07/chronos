@@ -61,7 +61,7 @@ pub trait VfsNode: core::fmt::Debug {
     fn get_child(&self, name: &str) -> Option<&dyn VfsNode>; // folder-only
     fn get_child_mut(&mut self, name: &str) -> Option<&mut Box<dyn VfsNode>>; // folder-only
     fn get_children(&self) -> Vec<&dyn VfsNode>; // folder-only
-    fn get_children_mut(&mut self) -> Vec<&mut Box<dyn VfsNode>>; // folder-only
+    fn get_children_mut(&mut self) -> &mut Vec<Box<dyn VfsNode>>; // folder-only
     fn resolve_path(&self, path: Path) -> Option<&dyn VfsNode>; // folder-only
     fn resolve_path_mut(&mut self, path: Path) -> Option<&mut dyn VfsNode>; // folder-only
     fn create_dir(&mut self, name: &str) -> Option<&mut Box<dyn VfsNode>>; // folder-only
@@ -95,7 +95,11 @@ impl VfsNode for Directory {
     }
     fn resolve_path(&self, path: Path) -> Option<&dyn VfsNode> {
         let mut current = self as &dyn VfsNode;
-        for part in path.to_string().split("/") {
+        let string = path.to_string();
+        if string == "/" {
+            return Some(get_vfs().get_root());
+        }
+        for part in string.split("/") {
             if part.is_empty() || part == "." {
                 continue;
             } else if part == ".." {
@@ -114,7 +118,12 @@ impl VfsNode for Directory {
     }
     fn resolve_path_mut(&mut self, path: Path) -> Option<&mut dyn VfsNode> {
         let mut current = self as &mut dyn VfsNode;
-        for part in path.to_string().split("/") {
+
+        let string = path.to_string();
+        if string == "/" {
+            return Some(get_vfs().get_root_mut().as_mut());
+        }
+        for part in string.split("/") {
             if part.is_empty() || part == "." {
                 continue;
             } else if part == ".." {
@@ -143,8 +152,8 @@ impl VfsNode for Directory {
     fn get_children(&self) -> Vec<&dyn VfsNode> {
         self.children.iter().map(|c| c.as_ref()).collect()
     }
-    fn get_children_mut(&mut self) -> Vec<&mut Box<dyn VfsNode>> {
-        self.children.iter_mut().collect()
+    fn get_children_mut(&mut self) -> &mut Vec<Box<dyn VfsNode>> {
+        &mut self.children
     }
     fn create_dir(&mut self, name: &str) -> Option<&mut Box<dyn VfsNode>> {
         self.children
@@ -202,8 +211,9 @@ impl VfsNode for File {
     fn get_children(&self) -> Vec<&dyn VfsNode> {
         Vec::new()
     }
-    fn get_children_mut(&mut self) -> Vec<&mut Box<dyn VfsNode>> {
-        Vec::new()
+    fn get_children_mut(&mut self) -> &mut Vec<Box<dyn VfsNode>> {
+        static mut EMPTY_DATA: Vec<Box<dyn VfsNode>> = Vec::new(); // holy bad code
+        unsafe { &mut EMPTY_DATA }
     }
     fn create_dir(&mut self, _name: &str) -> Option<&mut Box<dyn VfsNode>> {
         None

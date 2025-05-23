@@ -5,8 +5,6 @@
 
 use alloc::vec::Vec;
 
-use crate::info;
-
 #[cfg(target_arch = "x86_64")]
 use crate::utils::asm::port::{inl, outl};
 
@@ -15,6 +13,7 @@ pub static mut MCFG_ADDRESS: u64 = 0;
 
 #[derive(Debug)]
 pub struct PciDevice {
+    pub name: &'static str,
     pub address: PciAddress,
     pub vendor_id: u16,
     pub device_id: u16,
@@ -75,7 +74,7 @@ pub fn pci_config_read_u32(addr: PciAddress, offset: u8) -> u32 {
 
             #[cfg(target_arch = "aarch64")]
             {
-                panic!("PCI access via I/O ports is not supported on AArch64");
+                panic!("couldn't access pci");
             }
         }
     }
@@ -115,13 +114,14 @@ pub fn pci_config_write_u32(addr: PciAddress, offset: u8, value: u32) {
 
             #[cfg(target_arch = "aarch64")]
             {
-                panic!("PCI access via I/O ports is not supported on AArch64");
+                panic!("couldn't access pci");
             }
         }
     }
 }
 
 pub fn pci_enumerate() {
+    unsafe { PCI_DEVICES.clear() };
     enumerate_bus(0);
 }
 
@@ -156,7 +156,7 @@ fn enumerate_device(bus: u8, device: u8) {
         let subclass = ((class_info >> 16) & 0xFF) as u8;
         let prog_if = ((class_info >> 8) & 0xFF) as u8;
 
-        let device_type = match (class_code, subclass, prog_if) {
+        let name = match (class_code, subclass, prog_if) {
             (0x01, 0x06, 0x01) => "AHCI storage controller",
             (0x01, 0x08, 0x02) => "NVMe storage device",
             (0x01, 0x01, _) => "IDE storage controller",
@@ -169,12 +169,9 @@ fn enumerate_device(bus: u8, device: u8) {
             _ => "PCI device",
         };
 
-        info!(
-            "Found {device_type} {vendor_id:04X}:{device_id:04X} [0x{class_code:X}:0x{subclass:X}:0x{prog_if:X}]",
-        );
-
         unsafe {
             PCI_DEVICES.push(PciDevice {
+                name, // ehh
                 address: pciaddr,
                 vendor_id,
                 device_id,
