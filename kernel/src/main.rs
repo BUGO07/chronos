@@ -9,10 +9,10 @@
     static_mut_refs,
     clippy::new_ret_no_self,
     clippy::missing_safety_doc,
-    clippy::single_match,
     clippy::manual_dangling_ptr,
-    clippy::empty_loop,
-    clippy::not_unsafe_ptr_arg_deref
+    clippy::not_unsafe_ptr_arg_deref,
+    clippy::too_many_arguments,
+    clippy::while_immutable_condition
 )]
 #![cfg_attr(
     feature = "tests",

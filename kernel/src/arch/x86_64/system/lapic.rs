@@ -69,7 +69,6 @@ pub fn init() {
 
 fn lapic_oneshot_timer_handler(stack_frame: *mut StackFrame) {
     crate::scheduler::schedule(stack_frame);
-
     mmio_write(reg::EOI, 0);
 }
 

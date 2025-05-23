@@ -3,64 +3,17 @@
     Released under EUPL 1.2 License
 */
 
-use crate::{arch::drivers::time::pit::current_pit_ticks, print, utils::time::KernelTimer};
+use crate::println;
 
-pub fn pit_timer() {
-    let time = current_pit_ticks();
-    loop {
-        if time + 200 < current_pit_ticks() {
-            break;
-        }
-    }
-}
-
-pub fn kvm_timer() {
-    let kvm = unsafe {
-        crate::arch::drivers::time::kvm::KVM_TIMER
-            .get()
-            .expect("couldnt get kvm")
-    };
-    if !kvm.is_supported() {
-        return print!("[kvm not supported] ");
-    }
-    let time = kvm.elapsed_ns();
-    loop {
-        if time + 200_000_000 < kvm.elapsed_ns() {
-            break;
-        }
-    }
-}
-
-pub fn tsc_timer() {
-    let tsc = unsafe {
-        crate::arch::drivers::time::tsc::TSC_TIMER
-            .get()
-            .expect("couldnt get tsc")
-    };
-    if !tsc.is_supported() {
-        return print!("[tsc not supported] ");
-    }
-    let time = tsc.elapsed_ns();
-    loop {
-        if time + 200_000_000 < tsc.elapsed_ns() {
-            break;
-        }
-    }
-}
-
-pub fn hpet_timer() {
-    let hpet = unsafe {
-        crate::arch::drivers::time::hpet::HPET_TIMER
-            .get()
-            .expect("couldnt get hpet")
-    };
-    if !hpet.is_supported() {
-        return print!("[hpet not supported] ");
-    }
-    let time = hpet.elapsed_ns();
-    loop {
-        if time + 200_000_000 < hpet.elapsed_ns() {
-            break;
+pub fn all_timers() {
+    for timer in crate::arch::drivers::time::get_timers().iter() {
+        if timer.supported {
+            let time = (timer.elapsed_ns)(timer);
+            loop {
+                if time + 200 < (timer.elapsed_ns)(timer) {
+                    break;
+                }
+            }
         }
     }
 }

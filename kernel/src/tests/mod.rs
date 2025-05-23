@@ -45,13 +45,7 @@ pub fn init() {
         &memory::malloc_test,
     ]);
     println!("\nTimer tests...");
-    test_runner(&[
-        &time::pit_timer,
-        &time::kvm_timer,
-        &time::tsc_timer,
-        &time::hpet_timer,
-        &time::preferred_timer,
-    ]);
+    test_runner(&[&time::preferred_timer, &time::all_timers]);
     crate::drivers::acpi::shutdown();
     halt_loop()
 }

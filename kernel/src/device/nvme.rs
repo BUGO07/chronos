@@ -3,6 +3,5 @@
     Released under EUPL 1.2 License
 */
 
-pub mod nvme;
-pub mod pci;
-pub mod serial;
+// TODO
+pub fn init() {}

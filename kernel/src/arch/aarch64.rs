@@ -28,10 +28,10 @@ pub fn _start() -> ! {
     crate::device::serial::init();
     println!("\n{NOOO}\n");
     info!("aarch64 kernel starting...\n");
-    self::drivers::time::early_init();
     crate::memory::init();
     self::interrupts::init();
     self::interrupts::gic::init();
+    self::drivers::time::early_init();
     self::drivers::time::init();
     crate::drivers::fs::init();
     // crate::drivers::acpi::init(); // TODO: implement mmu for acpi to work
@@ -96,7 +96,7 @@ pub fn _panic(info: &PanicInfo) -> ! {
     }
     #[cfg(not(feature = "tests"))]
     {
-        print!("{}", crate::utils::logger::color::RED);
+        print!("\x1b[2J{}", crate::utils::logger::color::RED);
         print_centered!(NOOO);
         print_fill!("~", "Kernel Panic");
         print_centered!("", "~");

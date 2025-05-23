@@ -3,59 +3,12 @@
     Released under EUPL 1.2 License
 */
 
-use core::{cell::OnceCell, sync::atomic::Ordering};
+use core::sync::atomic::Ordering;
 
 use crate::{
     debug, info,
-    utils::{asm::_rdtsc, time::KernelTimer},
+    utils::{asm::_rdtsc, time::Timer},
 };
-
-pub static mut TSC_TIMER: OnceCell<TscTimer> = OnceCell::new();
-
-pub struct TscTimer {
-    start: u64,
-    supported: bool,
-}
-
-impl TscTimer {
-    pub fn start() -> Self {
-        TscTimer {
-            start: _rdtsc(),
-            supported: false,
-        }
-    }
-
-    pub fn elapsed_cycles(&self) -> u64 {
-        _rdtsc() - self.start
-    }
-
-    pub fn set_supported(&mut self, supported: bool) {
-        self.supported = supported;
-    }
-}
-
-impl KernelTimer for TscTimer {
-    fn is_supported(&self) -> bool {
-        self.supported
-    }
-
-    fn elapsed_ns(&self) -> u64 {
-        if self.supported {
-            (self.elapsed_cycles() as u128 * 1_000_000_000
-                / crate::arch::CPU_FREQ.load(Ordering::Relaxed) as u128) as u64
-        } else {
-            0
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        "TSC"
-    }
-
-    fn priority(&self) -> u8 {
-        10
-    }
-}
 
 pub fn measure_cpu_frequency() -> u64 {
     if super::kvm::supported() {
@@ -85,13 +38,20 @@ pub fn measure_cpu_frequency() -> u64 {
 }
 
 pub fn init() {
-    unsafe {
-        info!("setting up...");
-        TSC_TIMER.set(TscTimer::start()).ok();
-        let freq = measure_cpu_frequency();
-        debug!("cpu frequency - {}hz", freq);
-        crate::arch::x86_64::CPU_FREQ.store(freq, Ordering::Relaxed);
-        TSC_TIMER.get_mut().unwrap().set_supported(true);
-        info!("done");
-    }
+    info!("setting up...");
+    let freq = measure_cpu_frequency();
+    debug!("cpu frequency - {}hz", freq);
+    super::register_timer(Timer::new(
+        "TSC",
+        _rdtsc(),
+        freq,
+        true,
+        10,
+        |timer: &Timer| {
+            (((_rdtsc() - timer.start) as u128 * 1_000_000_000) / timer.frequency as u128) as u64
+        },
+        0,
+    ));
+    crate::arch::x86_64::CPU_FREQ.store(freq, Ordering::Relaxed);
+    info!("done");
 }

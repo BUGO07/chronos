@@ -24,6 +24,8 @@ run-x86_64: ovmf/OVMF_x86_64.fd $(IMAGE_NAME).iso
 		-cpu host \
 		-serial stdio \
 		-device secondary-vga \
+		-drive file=kernel_disk.qcow2,format=qcow2,if=none,id=nvme0 \
+		-device nvme,drive=nvme0,serial=deadbeef \
 		-bios ovmf/OVMF_x86_64.fd \
 		-boot order=d,menu=on,splash-time=0 \
 		-enable-kvm \

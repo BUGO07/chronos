@@ -10,7 +10,10 @@ use alloc::string::String;
 use crate::{
     arch::interrupts::StackFrame,
     info,
-    utils::asm::port::{outb, outl},
+    utils::{
+        asm::port::{outb, outl},
+        time::Timer,
+    },
 };
 
 pub const PIT_FREQUENCY: u32 = 1193182;
@@ -21,6 +24,15 @@ pub fn init() {
     outb(0x43, 0b00110100);
     outl(0x40, (PIT_FREQUENCY / 1000) & 0xFF);
     outl(0x40, (PIT_FREQUENCY / 1000) >> 8);
+    super::register_timer(Timer::new(
+        "PIT",
+        0,
+        1000,
+        true,
+        !0,
+        |_: &Timer| ELAPSED_MS.load(Ordering::Relaxed) * 1_000_000,
+        0,
+    ));
     crate::arch::interrupts::pic::unmask(0);
     info!("done");
 }

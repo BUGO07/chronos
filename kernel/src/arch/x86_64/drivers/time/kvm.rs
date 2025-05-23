@@ -3,8 +3,6 @@
     Released under EUPL 1.2 License
 */
 
-use core::cell::OnceCell;
-
 use alloc::sync::Arc;
 
 use crate::{
@@ -12,61 +10,15 @@ use crate::{
     utils::{
         asm::{_cpuid, _rdtsc, regs::wrmsr},
         limine::get_hhdm_offset,
-        time::KernelTimer,
+        time::Timer,
     },
 };
 
-pub static mut KVM_TIMER: OnceCell<KvmTimer> = OnceCell::new();
-
-static mut STARTUP_OFFSET: u64 = 0;
-
-pub struct KvmTimer {
-    supported: bool,
-    table_pointer: Arc<PvClockVcpuTimeInfo>,
+lazy_static::lazy_static! {
+    static ref TABLE: Arc<PvClockVcpuTimeInfo> = Arc::new(PvClockVcpuTimeInfo::default());
 }
 
-impl KvmTimer {
-    pub fn start() -> Self {
-        KvmTimer {
-            supported: false,
-            table_pointer: Arc::new(PvClockVcpuTimeInfo::default()),
-        }
-    }
-}
-
-impl KernelTimer for KvmTimer {
-    fn is_supported(&self) -> bool {
-        self.supported
-    }
-
-    fn elapsed_ns(&self) -> u64 {
-        if self.supported {
-            let table = &self.table_pointer;
-            let mut time: u128 = _rdtsc() as u128 - table.tsc_timestamp as u128;
-            if table.tsc_shift >= 0 {
-                time <<= table.tsc_shift;
-            } else {
-                time >>= -table.tsc_shift;
-            }
-            time = (time * table.tsc_to_system_mul as u128) >> 32;
-            time += table.system_time as u128;
-
-            time as u64 - unsafe { STARTUP_OFFSET }
-        } else {
-            0
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        "KVM"
-    }
-
-    fn priority(&self) -> u8 {
-        0
-    }
-}
-
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Default, Debug, Copy, Clone)]
 pub struct PvClockVcpuTimeInfo {
     pub version: u32,
@@ -75,25 +27,45 @@ pub struct PvClockVcpuTimeInfo {
     pub system_time: u64,
     pub tsc_to_system_mul: u32,
     pub tsc_shift: i8,
-    pub pad: [u8; 3],
+    pub flags: u8,
+    pub pad: [u8; 2],
 }
 
 pub fn init() {
-    let mut timer = KvmTimer::start();
     let is_supported = supported();
     info!("kvm clock supported: {}", is_supported);
     if is_supported {
-        let ptr = Arc::as_ptr(&timer.table_pointer) as u64;
-        timer.supported = true;
-        info!("setting up...");
-        wrmsr(0x4b564d01, (ptr - get_hhdm_offset()) | 1);
-        unsafe {
-            STARTUP_OFFSET = timer.elapsed_ns() - (super::pit::current_pit_ticks() / 1_000_000)
-        };
-        info!("done");
-    }
+        let mut timer = Timer::new(
+            "KVM",
+            0,
+            1,
+            true,
+            0,
+            |timer: &Timer| {
+                let table = &*TABLE;
+                let mut time: u128 = _rdtsc() as u128 - table.tsc_timestamp as u128;
+                if table.tsc_shift >= 0 {
+                    time <<= table.tsc_shift;
+                } else {
+                    time >>= -table.tsc_shift;
+                }
+                time = (time * table.tsc_to_system_mul as u128) >> 32;
+                time += table.system_time as u128;
 
-    unsafe { KVM_TIMER.set(timer).ok() };
+                time as u64 - timer.offset
+            },
+            0,
+        );
+        info!("setting up...");
+        wrmsr(
+            0x4b564d01,
+            (Arc::as_ptr(&*TABLE) as u64 - get_hhdm_offset()) | 1,
+        );
+        timer
+            .set_offset((timer.elapsed_ns)(&timer) - (super::pit::current_pit_ticks() / 1_000_000));
+        info!("done");
+        super::register_timer(timer);
+    }
 }
 
 pub fn supported() -> bool {
@@ -107,7 +79,7 @@ pub fn supported() -> bool {
 }
 
 pub fn tsc_freq() -> u64 {
-    let table = unsafe { &KVM_TIMER.get().unwrap().table_pointer };
+    let table = &*TABLE;
     let mut freq = (1_000_000_000u64 << 32) / table.tsc_to_system_mul as u64;
     if table.tsc_shift < 0 {
         freq <<= -table.tsc_shift;
