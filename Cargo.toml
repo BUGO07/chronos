@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "kernel",
+    "std",
+    "userspace/shell",
+    "userspace/echo",
+]
+
+[profile.dev]
+opt-level = 1
+lto = "thin"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+strip = true
+lto = "fat"
+
+[profile.smol]
+inherits = "release"
+opt-level = "z"
+codegen-units = 1
+strip = true
+lto = "fat"

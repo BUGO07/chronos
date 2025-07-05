@@ -1,0 +1,233 @@
+/*
+    Copyright (C) 2025 bugo07
+    Released under EUPL 1.2 License
+*/
+
+use core::arch::asm;
+use std::StackFrame;
+
+#[repr(C, packed)]
+pub struct IdtPtr {
+    limit: u16,
+    base: u64,
+}
+
+#[repr(C, packed)]
+#[derive(Clone, Copy)]
+struct IdtEntry {
+    offset0: u16,
+    selector: u16,
+    ist: u8,
+    typeattr: u8,
+    offset1: u16,
+    offset2: u32,
+    zero: u32,
+}
+
+impl IdtEntry {
+    const fn new() -> Self {
+        Self {
+            offset0: 0,
+            selector: 0,
+            ist: 0,
+            typeattr: 0,
+            offset1: 0,
+            offset2: 0,
+            zero: 0,
+        }
+    }
+
+    fn set(&mut self, isr: u64, typeattr: Option<u8>, ist: Option<u8>) {
+        self.typeattr = typeattr.unwrap_or(0x8E);
+        self.ist = ist.unwrap_or(0);
+
+        let addr = isr;
+        self.offset0 = (addr & 0xFFFF) as u16;
+        self.offset1 = ((addr >> 16) & 0xFFFF) as u16;
+        self.offset2 = (addr >> 32) as u32;
+
+        unsafe {
+            asm!("mov {0:x}, cs", out(reg) self.selector, options(nomem, nostack, preserves_flags));
+        }
+    }
+}
+
+core::arch::global_asm! {
+    r#"
+.extern isr_handler
+isr_common_stub:
+    cld
+
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov rdi, rsp
+    call isr_handler
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+
+    add rsp, 16
+
+    iretq
+
+.macro isr number
+    isr_\number:
+.if !(\number == 8 || (\number >= 10 && \number <= 14) || \number == 17 || \number == 21 || \number == 29 || \number == 30)
+    push 0
+.endif
+    push \number
+    jmp isr_common_stub
+.endm
+
+.altmacro
+.macro isr_insert number
+    .section .text
+    isr \number
+
+    .section .data
+    .quad isr_\number
+.endm
+
+.section .data
+.byte 1
+.align 8
+isr_table:
+.set i, 0
+.rept 256
+    isr_insert %i
+    .set i, i + 1
+.endr
+.global isr_table
+    "#
+}
+
+type HandlerFn = fn(frame: *mut StackFrame);
+static mut HANDLERS: [Option<HandlerFn>; 256] = [None; 256];
+static mut IDT: [IdtEntry; 256] = [IdtEntry::new(); 256];
+static mut IDTR: IdtPtr = IdtPtr {
+    limit: (size_of::<IdtEntry>() * 256 - 1) as u16,
+    base: 0,
+};
+
+const EXCEPTION_NAMES: [&str; 32] = [
+    "divide by zero",
+    "debug",
+    "non-maskable interrupt",
+    "breakpoint",
+    "detected overflow",
+    "out-of-bounds",
+    "invalid opcode",
+    "no coprocessor",
+    "double fault",
+    "coprocessor segment overrun",
+    "bad TSS",
+    "segment not present",
+    "stack fault",
+    "general protection fault",
+    "page fault",
+    "unknown interrupt",
+    "coprocessor fault",
+    "alignment check",
+    "machine check",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+    "reserved",
+];
+
+#[unsafe(no_mangle)]
+extern "C" fn isr_handler(regs: *mut StackFrame) {
+    unsafe {
+        let registers = &*regs;
+
+        if registers.vector == 14 {
+            let cr2: u64;
+            asm!("mov {}, cr2", out(reg) cr2, options(nomem, nostack, preserves_flags));
+            panic!("page fault at {:#x}, registers:\n\n{:?}", cr2, registers);
+        }
+
+        if registers.vector < 32 {
+            panic!(
+                "exception: {}, registers:\n\n{:?}",
+                EXCEPTION_NAMES[registers.vector as usize], registers
+            );
+        }
+
+        if let Some(handler) = HANDLERS[registers.vector as usize] {
+            handler(regs);
+        }
+    };
+}
+
+unsafe extern "C" {
+    static isr_table: u64;
+}
+
+pub fn init() {
+    let table = &raw const isr_table;
+    unsafe {
+        for (i, entry) in IDT.iter_mut().enumerate() {
+            entry.set(
+                *table.add(i),
+                if i == 0x80 { Some(0xEE) } else { Some(0x8E) },
+                None,
+            );
+        }
+        IDTR.base = IDT.as_ptr() as u64;
+
+        asm!("cli; lidt [{}]", in(reg) &IDTR, options(readonly, nostack, preserves_flags));
+
+        HANDLERS[0x80] = Some(crate::arch::system::syscall::syscall_dispatch); // skibidi syscall handler
+
+        HANDLERS[0x20] = Some(crate::arch::drivers::time::pit::timer_interrupt_handler);
+        HANDLERS[0x21] = Some(crate::arch::drivers::keyboard::keyboard_interrupt_handler);
+    }
+}
+
+pub fn install_interrupt(vector: u8, func: HandlerFn) {
+    unsafe {
+        HANDLERS[vector as usize] = Some(func);
+    }
+}
+
+pub fn clear_interrupt(vector: u8) {
+    unsafe {
+        HANDLERS[vector as usize] = None;
+    }
+}

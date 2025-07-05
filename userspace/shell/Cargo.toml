@@ -1,0 +1,8 @@
+[package]
+name = "shell"
+version = "0.1.0"
+authors = ["bugo07"]
+edition = "2024"
+
+[dependencies]
+std = { path = "../../std" }

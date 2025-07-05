@@ -1,0 +1,18 @@
+[package]
+name = "std"
+version = "0.1.0"
+authors = ["bugo07"]
+edition = "2024"
+
+[dependencies]
+limine = { version = "0.5", optional = true } 
+lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
+spin = "0.10.0" # TODO: needed for talc
+talc = "4.4.2" # TODO: my own allocator
+flanterm-sys = { path = "../bindings/flanterm-sys" }
+embedded-profiling = { version = "0.3.0", features = ["proc-macros", "container-u64"], optional = true }
+
+[features]
+# default = ["kernel"]
+kernel = ["dep:limine"]
+profiling = ["dep:embedded-profiling"]
