@@ -5,9 +5,15 @@
 
 use core::ffi::CStr;
 
-#[cfg(target_arch = "x86_64")]
-use crate::memory::vmm::{PAGEMAP, flag, page_size};
-use crate::{debug, device::pci::MCFG_ADDRESS, println, utils::limine::get_hhdm_offset};
+use crate::device::pci::MCFG_ADDRESS;
+use std::{
+    debug,
+    kernel::{
+        bootloader::get_hhdm_offset,
+        paging::{PAGEMAP, flag, page_size},
+    },
+    println,
+};
 
 use uacpi_sys::*;
 
@@ -49,7 +55,6 @@ pub fn init() {
 
             debug!("mapping mcfg: 0x{addr:X} -> 0x{virt:X}");
 
-            #[cfg(target_arch = "x86_64")]
             for i in (0..(256 * 1024 * 1024)).step_by(page_size::MEDIUM as usize) {
                 PAGEMAP.get_mut().unwrap().lock().map(
                     virt + i,

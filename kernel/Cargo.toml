@@ -4,38 +4,10 @@ version = "0.1.0"
 authors = ["bugo07"]
 edition = "2024"
 
-[profile.dev]
-opt-level = 1
-lto = "thin"
-
-[profile.release] # x86_64 release profile
-opt-level = 3
-codegen-units = 1
-strip = true
-lto = "fat"
-
-[profile.smol]
-inherits = "release"
-opt-level = "z"
-codegen-units = 1
-strip = true
-lto = "fat"
-
-[profile.armrel] # aarch64 release profile | seperate jic x86_64 breaks
-inherits = "release"
-opt-level = 3
-codegen-units = 1
-strip = true
-lto = "fat"
-
 [dependencies]
-limine = "0.4"
-lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 pc-keyboard = "0.8.0" # TODO: my own keyboard types
-spin = "0.10.0" # TODO: remove once talc is gone
-talc = "4.4.2" # TODO: my own allocator
 uacpi-sys = { path = "../bindings/uacpi-sys" }
-flanterm-sys = { path = "../bindings/flanterm-sys" }
+std = { path = "../std", features = ["kernel"] }
 
 [features]
 # default = ["tests"] # to get intelisense on test files

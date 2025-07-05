@@ -3,8 +3,18 @@
     Released under EUPL 1.2 License
 */
 
+use alloc::string::String;
+
+use crate::{
+    heapless::HeaplessVec,
+    info,
+    time::{TimerKind, elapsed_time_pretty},
+};
+
+pub static mut TIMERS: HeaplessVec<Timer, 10> = HeaplessVec::new();
+
 pub struct Timer {
-    pub name: &'static str,
+    pub kind: TimerKind,
     pub start: u64,
     pub frequency: u64,
     pub supported: bool,
@@ -15,7 +25,7 @@ pub struct Timer {
 
 impl Timer {
     pub fn new(
-        name: &'static str,
+        kind: TimerKind,
         start: u64,
         frequency: u64,
         supported: bool,
@@ -24,7 +34,7 @@ impl Timer {
         offset: u64,
     ) -> Self {
         Self {
-            name,
+            kind,
             start,
             frequency,
             supported,
@@ -33,8 +43,11 @@ impl Timer {
             offset,
         }
     }
+    pub fn kind(&self) -> &TimerKind {
+        &self.kind
+    }
     pub fn name(&self) -> &'static str {
-        self.name
+        self.kind.into()
     }
     pub fn is_supported(&self) -> bool {
         self.supported
@@ -48,71 +61,48 @@ impl Timer {
     pub fn set_offset(&mut self, offset: u64) {
         self.offset = offset;
     }
+    pub fn elapsed(&self) -> u64 {
+        (self.elapsed_ns)(self)
+    }
     pub fn elapsed_pretty(&self, digits: u32) -> alloc::string::String {
         elapsed_time_pretty((self.elapsed_ns)(self), digits)
     }
 }
 
-pub fn elapsed_time_pretty(ns: u64, digits: u32) -> alloc::string::String {
-    let subsecond_ns = ns % 1_000_000_000;
+pub fn register_timer(timer: Timer) {
+    info!("registering timer - {} [{}]", timer.name(), timer.priority);
+    unsafe { TIMERS.push(timer).ok() };
+    get_timers().sort_by(|a, b| a.priority.cmp(&b.priority));
+}
 
-    let divisor = 10u64.pow(9 - digits);
-    let subsecond = subsecond_ns / divisor;
+pub fn get_timers() -> &'static mut HeaplessVec<Timer, 10> {
+    unsafe { &mut TIMERS }
+}
 
-    let elapsed_ms = ns / 1_000_000;
-    let seconds_total = elapsed_ms / 1000;
-    let seconds = seconds_total % 60;
-    let minutes_total = seconds_total / 60;
-    let minutes = minutes_total % 60;
-    let hours = minutes_total / 60;
+pub fn get_timer(kind: &TimerKind) -> &mut Timer {
+    get_timers().iter_mut().find(|x| x.kind() == kind).unwrap()
+}
 
-    alloc::format!(
-        "{:02}:{:02}:{:02}.{:0width$}",
-        hours,
-        minutes,
-        seconds,
-        subsecond,
-        width = digits as usize
-    )
+pub fn get_timer_by_name(name: &str) -> &mut Timer {
+    get_timers().iter_mut().find(|x| x.name() == name).unwrap()
 }
 
 #[inline(always)]
-pub fn busywait_ns(ns: u64) {
-    let start = crate::arch::drivers::time::preferred_timer_ns();
-    while crate::arch::drivers::time::preferred_timer_ns() - start < ns {
-        core::hint::spin_loop();
-    }
+pub fn preferred_timer_ms() -> u64 {
+    preferred_timer_ns() / 1_000_000
 }
 
-#[inline(always)]
-pub fn busywait_ms(ms: u64) {
-    busywait_ns(ms * 1_000_000);
-}
-
-pub fn is_leap_year(year: u16) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
-}
-
-pub fn days_in_month(year: u16, month: u8) -> u32 {
-    match month {
-        1 => 31,
-        2 => {
-            if is_leap_year(year) {
-                29
-            } else {
-                28
-            }
+pub fn preferred_timer_ns() -> u64 {
+    for timer in get_timers().iter() {
+        if timer.is_supported() {
+            return (timer.elapsed_ns)(timer);
         }
-        3 => 31,
-        4 => 30,
-        5 => 31,
-        6 => 30,
-        7 => 31,
-        8 => 31,
-        9 => 30,
-        10 => 31,
-        11 => 30,
-        12 => 31,
-        _ => 0,
     }
+
+    0
+}
+
+#[inline(always)]
+pub fn preferred_timer_pretty(digits: u32) -> String {
+    crate::time::elapsed_time_pretty(preferred_timer_ns(), digits)
 }

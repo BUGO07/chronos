@@ -14,26 +14,15 @@
     clippy::too_many_arguments,
     clippy::while_immutable_condition
 )]
-#![cfg_attr(
-    feature = "tests",
-    allow(unused_imports, unused_variables, dead_code, unused_mut)
-)]
 
 extern crate alloc;
 
 use core::panic::PanicInfo;
 
-pub const NOOO: &str = include_str!("../res/nooo.txt");
-
 pub mod arch;
 pub mod device;
 pub mod drivers;
-pub mod memory;
-pub mod scheduler;
 pub mod utils;
-
-#[cfg(feature = "tests")]
-pub mod tests;
 
 #[unsafe(no_mangle)]
 extern "C" fn kmain() -> ! {

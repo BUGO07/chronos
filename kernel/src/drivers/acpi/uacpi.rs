@@ -13,21 +13,20 @@ use core::{
 use alloc::{boxed::Box, collections::btree_map::BTreeMap};
 use uacpi_sys::*;
 
-use crate::{
-    debug,
-    device::pci::{
-        PciAddress, pci_config_read_u8, pci_config_read_u16, pci_config_read_u32,
-        pci_config_write_u8, pci_config_write_u16, pci_config_write_u32,
-    },
-    error, info,
-    utils::{limine::get_rsdp_address, mutex::Mutex, spinlock::SpinLock},
-    warn,
+use std::{
+    debug, error, info, kernel::bootloader::get_rsdp_address, spinlock::SpinLock,
+    spinlock::SpinLock as Mutex, warn,
+};
+
+use crate::device::pci::{
+    PciAddress, pci_config_read_u8, pci_config_read_u16, pci_config_read_u32, pci_config_write_u8,
+    pci_config_write_u16, pci_config_write_u32,
 };
 
 #[cfg(target_arch = "x86_64")]
-use crate::{
-    memory::vmm::{PAGEMAP, flag, page_size},
-    utils::asm::port::{inb, inl, inw, outb, outl, outw},
+use std::{
+    asm::port::{inb, inl, inw, outb, outl, outw},
+    kernel::paging::{PAGEMAP, flag, page_size},
 };
 
 #[unsafe(no_mangle)]
@@ -176,7 +175,7 @@ extern "C" fn uacpi_kernel_io_read8(
         unsafe { *_value = inb((_handle as usize + _offset) as u16) };
         UACPI_STATUS_OK
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(not(target_arch = "x86_64"))]
     {
         UACPI_STATUS_UNIMPLEMENTED
     }
@@ -193,7 +192,7 @@ extern "C" fn uacpi_kernel_io_read16(
         unsafe { *_value = inw((_handle as usize + _offset) as u16) };
         UACPI_STATUS_OK
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(not(target_arch = "x86_64"))]
     {
         UACPI_STATUS_UNIMPLEMENTED
     }
@@ -210,7 +209,7 @@ extern "C" fn uacpi_kernel_io_read32(
         unsafe { *_value = inl((_handle as usize + _offset) as u16) };
         UACPI_STATUS_OK
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(not(target_arch = "x86_64"))]
     {
         UACPI_STATUS_UNIMPLEMENTED
     }
@@ -227,7 +226,7 @@ extern "C" fn uacpi_kernel_io_write8(
         outb((_handle as usize + _offset) as u16, _value);
         UACPI_STATUS_OK
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(not(target_arch = "x86_64"))]
     {
         UACPI_STATUS_UNIMPLEMENTED
     }
@@ -244,7 +243,7 @@ extern "C" fn uacpi_kernel_io_write16(
         outw((_handle as usize + _offset) as u16, _value);
         UACPI_STATUS_OK
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(not(target_arch = "x86_64"))]
     {
         UACPI_STATUS_UNIMPLEMENTED
     }
@@ -261,7 +260,7 @@ extern "C" fn uacpi_kernel_io_write32(
         outl((_handle as usize + _offset) as u16, _value);
         UACPI_STATUS_OK
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(not(target_arch = "x86_64"))]
     {
         UACPI_STATUS_UNIMPLEMENTED
     }
@@ -272,8 +271,8 @@ extern "C" fn uacpi_kernel_map(_addr: uacpi_phys_addr, _len: uacpi_size) -> *mut
     #[cfg(target_arch = "x86_64")]
     {
         let psize = page_size::SMALL;
-        let paddr = crate::utils::align_down(_addr, psize);
-        let size = crate::utils::align_up((_addr - paddr) + _len as u64, psize);
+        let paddr = std::align_down(_addr, psize);
+        let size = std::align_up((_addr - paddr) + _len as u64, psize);
 
         for i in (0..size).step_by(psize as usize) {
             unsafe {
@@ -286,7 +285,7 @@ extern "C" fn uacpi_kernel_map(_addr: uacpi_phys_addr, _len: uacpi_size) -> *mut
         }
         _addr as *mut c_void
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(not(target_arch = "x86_64"))]
     null_mut()
 }
 
@@ -350,24 +349,24 @@ extern "C" fn uacpi_kernel_log(lvl: uacpi_log_level, msg: *const uacpi_char) {
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_get_nanoseconds_since_boot() -> uacpi_u64 {
-    crate::arch::drivers::time::preferred_timer_ns()
+    std::kernel::time::preferred_timer_ns()
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_stall(usec: uacpi_u8) {
-    crate::utils::time::busywait_ns(usec as u64 * 1000);
+    std::time::busywait_ns(usec as u64 * 1000);
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_sleep(msec: uacpi_u64) {
     #[cfg(target_arch = "x86_64")]
-    if crate::scheduler::is_initialized() {
-        crate::scheduler::thread::sleep_ms(msec);
-    } else {
-        crate::utils::time::busywait_ms(msec);
-    }
-    #[cfg(target_arch = "aarch64")]
-    crate::utils::time::busywait_ms(msec);
+    // if crate::scheduler::is_initialized() {
+    //     crate::scheduler::thread::sleep_ms(msec);
+    // } else {
+    std::time::busywait_ms(msec);
+    // }
+    #[cfg(not(target_arch = "x86_64"))]
+    std::time::busywait_ms(msec);
 }
 
 #[unsafe(no_mangle)]
@@ -434,8 +433,8 @@ extern "C" fn uacpi_kernel_acquire_mutex(handle: uacpi_handle, timeout: uacpi_u1
             return UACPI_STATUS_OK;
         }
         0x0000 => {
-            let time = crate::arch::drivers::time::preferred_timer_ms();
-            while crate::arch::drivers::time::preferred_timer_ms() < time + timeout as u64 {
+            let time = std::kernel::time::preferred_timer_ms();
+            while std::kernel::time::preferred_timer_ms() < time + timeout as u64 {
                 locked = mutex.try_lock();
                 if locked.is_none() {
                     uacpi_kernel_sleep(1);
@@ -523,14 +522,14 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
 }
 
 #[cfg(target_arch = "x86_64")]
-fn handle_uacpi_interrupt(_stack_frame: *mut crate::arch::interrupts::StackFrame) {
+fn handle_uacpi_interrupt(_stack_frame: *mut std::StackFrame) {
     unsafe {
         if let Some(handler) = UACPI_INTERRUPT_HANDLER_FN {
             handler.unwrap()(UACPI_INTERRUPT_CTX.unwrap());
         }
     }
     #[cfg(target_arch = "x86_64")]
-    crate::arch::interrupts::pic::send_eoi(9);
+    crate::arch::pic::send_eoi(9);
 }
 
 #[unsafe(no_mangle)]
@@ -569,9 +568,9 @@ static mut INTS_ENABLED: bool = true;
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flags {
     if !handle.is_null() {
-        let ints_enabled = crate::utils::asm::int_status();
+        let ints_enabled = std::asm::int_status();
         if ints_enabled {
-            crate::utils::asm::toggle_ints(false);
+            std::asm::toggle_ints(false);
         }
         let lock = unsafe { &*(handle as *const SpinLock<()>) };
         lock.lock();
@@ -586,7 +585,7 @@ extern "C" fn uacpi_kernel_unlock_spinlock(handle: uacpi_handle) {
         let lock = unsafe { &*(handle as *const SpinLock<()>) };
         unsafe { lock.force_unlock() };
         if unsafe { INTS_ENABLED } {
-            crate::utils::asm::toggle_ints(true);
+            std::asm::toggle_ints(true);
         }
     }
 }

@@ -3,20 +3,20 @@
     Released under EUPL 1.2 License
 */
 
-use crate::utils::spinlock::SpinLock;
-use crate::{memory::get_memory_init_stage, serial_print};
 use alloc::vec::Vec;
 use core::{
     alloc::Layout,
-    ffi::c_void,
+    ffi::{c_char, c_void},
     fmt::{self, Write},
     ptr::null_mut,
 };
 
-use super::limine::get_framebuffers;
+use crate::{kernel::bootloader::get_framebuffers, memory::get_memory_init_stage, serial_print};
 
-lazy_static::lazy_static! {
-    pub static ref WRITERS: SpinLock<Vec<Writer>> = SpinLock::new(Writer::new());
+pub static mut WRITERS: Vec<Writer> = Vec::new();
+
+pub fn init() {
+    unsafe { WRITERS = Writer::new() };
 }
 
 pub struct Writer {
@@ -45,7 +45,7 @@ const MARGIN: usize = 10;
 impl Writer {
     fn new() -> Vec<Writer> {
         let mut flanterm_contexts = Vec::new();
-        #[cfg(not(feature = "uacpi_test"))]
+        // #[cfg(not(feature = "uacpi_test"))]
         {
             for framebuffer in get_framebuffers() {
                 unsafe {
@@ -89,10 +89,7 @@ impl Writer {
     }
 
     fn write(&mut self, s: &str) {
-        #[cfg(target_arch = "x86_64")]
-        let buf = s.as_ptr() as *const i8;
-        #[cfg(target_arch = "aarch64")]
-        let buf = s.as_ptr();
+        let buf = s.as_ptr() as *const c_char;
         unsafe { flanterm_sys::flanterm_write(self.ctx, buf, s.len()) };
     }
 }
@@ -116,47 +113,10 @@ pub fn get_cursor_pos() -> u64 {
 
 impl fmt::Write for Writer {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        #[cfg(not(feature = "uacpi_test"))]
+        // #[cfg(not(feature = "uacpi_test"))]
         self.write(s);
         Ok(())
     }
-}
-
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => ($crate::utils::term::_print(format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! println {
-    () => ($crate::print!("\n"));
-    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! print_fill {
-    ($what:expr) => {
-        $crate::utils::term::_print_fill($what, "", true)
-    };
-    ($what:expr, $with:expr) => {
-        $crate::utils::term::_print_fill($what, $with, true)
-    };
-    ($what:expr, $with:expr, $newline:expr) => {
-        $crate::utils::term::_print_fill($what, $with, $newline)
-    };
-}
-
-#[macro_export]
-macro_rules! print_centered {
-    ($what:expr) => {
-        $crate::utils::term::_print_centered($what, "", true)
-    };
-    ($what:expr, $with:expr) => {
-        $crate::utils::term::_print_centered($what, $with, true)
-    };
-    ($what:expr, $with:expr, $newline:expr) => {
-        $crate::utils::term::_print_centered($what, $with, $newline)
-    };
 }
 
 #[doc(hidden)]
@@ -164,17 +124,17 @@ pub fn _print(args: fmt::Arguments) {
     serial_print!("{}", args);
     if get_memory_init_stage() > 0 {
         let closure = || {
-            for writer in WRITERS.lock().iter_mut() {
+            for writer in unsafe { WRITERS.iter_mut() } {
                 writer.write_fmt(args).expect("Printing failed");
             }
         };
-        crate::utils::asm::without_ints(closure);
+        crate::asm::without_ints(closure);
     }
 }
 
 #[doc(hidden)]
 pub fn _print_fill(what: &str, with: &str, newline: bool) {
-    #[cfg(not(feature = "uacpi_test"))]
+    // #[cfg(not(feature = "uacpi_test"))]
     {
         if with.is_empty() {
             serial_print!("{}", what.repeat(65));
@@ -185,8 +145,8 @@ pub fn _print_fill(what: &str, with: &str, newline: bool) {
             serial_print!("\n");
         }
         if get_memory_init_stage() > 0 {
-            crate::utils::asm::without_ints(|| {
-                for (i, writer) in WRITERS.lock().iter_mut().enumerate() {
+            crate::asm::without_ints(|| {
+                for (i, writer) in unsafe { WRITERS.iter_mut().enumerate() } {
                     let width = get_framebuffers().nth(i).unwrap().width() as usize;
                     let cols = (width - 2 * MARGIN) / (1 + FONT_WIDTH * FONT_SCALE_X);
                     if with.is_empty() {
@@ -216,15 +176,15 @@ pub fn _print_fill(what: &str, with: &str, newline: bool) {
 
 #[doc(hidden)]
 pub fn _print_centered(what: &str, with: &str, newline: bool) {
-    #[cfg(not(feature = "uacpi_test"))]
+    // #[cfg(not(feature = "uacpi_test"))]
     {
         serial_print!("{}", what);
         if newline {
             serial_print!("\n");
         }
         if get_memory_init_stage() > 0 {
-            crate::utils::asm::without_ints(|| {
-                for (i, writer) in WRITERS.lock().iter_mut().enumerate() {
+            crate::asm::without_ints(|| {
+                for (i, writer) in unsafe { WRITERS.iter_mut().enumerate() } {
                     let width = get_framebuffers().nth(i).unwrap().width() as usize;
                     let cols = (width - 2 * MARGIN) / (1 + FONT_WIDTH * FONT_SCALE_X);
                     for line in what.split('\n') {

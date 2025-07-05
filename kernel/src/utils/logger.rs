@@ -49,19 +49,19 @@ pub mod color {
 }
 
 pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::fmt::Arguments) {
-    #[cfg(not(any(feature = "tests", feature = "uacpi_test")))]
+    // #[cfg(not(any(feature = "tests", feature = "uacpi_test")))]
     {
         if level == "dbug" && !cfg!(debug_assertions) {
             return;
         }
         module_path = module_path.split("::").last().unwrap();
-        if module_path == "x86_64" || module_path == "aarch64" {
+        if module_path == "arch" {
             module_path = "chronos";
         }
 
         let digits = 5;
 
-        let elapsed_ns = crate::arch::drivers::time::preferred_timer_ns();
+        let elapsed_ns = crate::time::preferred_timer_ns();
         let subsecond_ns = elapsed_ns % 1_000_000_000;
 
         let divisor = 10u64.pow(9 - digits);
@@ -95,9 +95,9 @@ pub fn log_message(level: &str, color: &str, mut module_path: &str, args: core::
 #[macro_export]
 macro_rules! ok {
     ($($arg:tt)*) => {
-        $crate::utils::logger::log_message(
+        $crate::kernel::logger::log_message(
             " OK ",
-            $crate::utils::logger::color::DARK_GREEN,
+            $crate::kernel::logger::color::DARK_GREEN,
             module_path!(),
             format_args!($($arg)*),
         )
@@ -106,20 +106,20 @@ macro_rules! ok {
 
 #[macro_export]
 macro_rules! info {
-    ($($arg:tt)*) => ($crate::utils::logger::log_message("info", $crate::utils::logger::color::GREEN, module_path!(), format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::kernel::logger::log_message("info", $crate::kernel::logger::color::GREEN, module_path!(), format_args!($($arg)*)));
 }
 
 #[macro_export]
 macro_rules! debug {
-    ($($arg:tt)*) => ($crate::utils::logger::log_message("dbug", $crate::utils::logger::color::CYAN, module_path!(), format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::kernel::logger::log_message("dbug", $crate::kernel::logger::color::CYAN, module_path!(), format_args!($($arg)*)));
 }
 
 #[macro_export]
 macro_rules! warn {
-    ($($arg:tt)*) => ($crate::utils::logger::log_message("warn", $crate::utils::logger::color::YELLOW, module_path!(), format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::kernel::logger::log_message("warn", $crate::kernel::logger::color::YELLOW, module_path!(), format_args!($($arg)*)));
 }
 
 #[macro_export]
 macro_rules! error {
-    ($($arg:tt)*) => ($crate::utils::logger::log_message("error", $crate::utils::logger::color::RED, module_path!(), format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::kernel::logger::log_message("error", $crate::kernel::logger::color::RED, module_path!(), format_args!($($arg)*)));
 }

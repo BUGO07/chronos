@@ -5,8 +5,7 @@
 
 use alloc::vec::Vec;
 
-#[cfg(target_arch = "x86_64")]
-use crate::utils::asm::port::{inl, outl};
+use std::asm::port::{inl, outl};
 
 pub static mut PCI_DEVICES: Vec<PciDevice> = Vec::new();
 pub static mut MCFG_ADDRESS: u64 = 0;
@@ -30,7 +29,6 @@ pub struct PciAddress {
 }
 
 impl PciAddress {
-    #[cfg(target_arch = "x86_64")]
     fn io_config_address(&self, offset: u8) -> u32 {
         let bus = self.bus as u32;
         let device = self.device as u32;
@@ -63,19 +61,11 @@ pub fn pci_config_read_u16(addr: PciAddress, offset: u8) -> u16 {
 pub fn pci_config_read_u32(addr: PciAddress, offset: u8) -> u32 {
     unsafe {
         if MCFG_ADDRESS != 0 {
-            crate::utils::asm::mmio::read(addr.mmio_config_address(offset) as u64, 4) as u32
+            std::asm::mmio::read(addr.mmio_config_address(offset) as u64, 4) as u32
         } else {
-            #[cfg(target_arch = "x86_64")]
-            {
-                let address = addr.io_config_address(offset);
-                outl(0xCF8, address);
-                inl(0xCFC)
-            }
-
-            #[cfg(target_arch = "aarch64")]
-            {
-                panic!("couldn't access pci");
-            }
+            let address = addr.io_config_address(offset);
+            outl(0xCF8, address);
+            inl(0xCFC)
         }
     }
 }
@@ -99,23 +89,11 @@ pub fn pci_config_write_u16(addr: PciAddress, offset: u8, value: u16) {
 pub fn pci_config_write_u32(addr: PciAddress, offset: u8, value: u32) {
     unsafe {
         if MCFG_ADDRESS != 0 {
-            crate::utils::asm::mmio::write(
-                addr.mmio_config_address(offset) as u64,
-                value as u64,
-                4,
-            );
+            std::asm::mmio::write(addr.mmio_config_address(offset) as u64, value as u64, 4);
         } else {
-            #[cfg(target_arch = "x86_64")]
-            {
-                let address = addr.io_config_address(offset);
-                outl(0xCF8, address);
-                outl(0xCFC, value);
-            }
-
-            #[cfg(target_arch = "aarch64")]
-            {
-                panic!("couldn't access pci");
-            }
+            let address = addr.io_config_address(offset);
+            outl(0xCF8, address);
+            outl(0xCFC, value);
         }
     }
 }

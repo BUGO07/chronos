@@ -1,6 +1,6 @@
 # ChronOS
 
-A basic multi-arch hobby os held together by duct tape, written in rust.
+A basic hobby os held together by duct tape, written in rust.
 
 Contributors are welcome.
 
@@ -24,24 +24,13 @@ Contributors are welcome.
 - Basic Shell
 - Basic RAM FS
 
-### aarch64 (arm64)
-
-- Terminal Emulator
-- Serial IO
-- Generic Timer
-- Memory Allocator (no pagemap yet)
-- Cooperative Scheduler
-- Basic Shell (input via serial)
-- Basic RAM FS
-
 ## TODO:
 
 - Proper build system insteaad of just `make`
 - Utilize all cpu cores
 - NVMe
 - USB
-- ELF loading
-- Interrupts, MMU and preemptive scheduler on aarch64
+- Port libc
 
 ## Known Bugs/Issues
 
@@ -66,8 +55,6 @@ Follow these steps to build and run the OS:
 2. Go to the root directory of cloned repo and run:\
 ``make run`` For running\
 ``make test`` For tests\
-``make uacpi-test`` For measuring [uACPI](https://github.com/uACPI/uACPI) score
 
 Environment variables:\
 RUST_PROFILE - changes the rust build profile - `dev`/`release`/`smol` - default=`dev`\
-KARCH - changes the target architecture - `x86_64`/`aarch64` - default=`x86_64`
