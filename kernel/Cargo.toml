@@ -29,7 +29,7 @@ strip = true
 lto = "fat"
 
 [dependencies]
-limine = "0.4"
+limine = "0.5"
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 pc-keyboard = "0.8.0" # TODO: my own keyboard types
 spin = "0.10.0" # TODO: remove once talc is gone
