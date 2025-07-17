@@ -44,15 +44,15 @@ pub fn init() {
 
     debug!("mapping mmio: 0x{:X} -> 0x{:X}", phys_mmio, mmio);
 
-    if unsafe {
-        !crate::memory::vmm::PAGEMAP.get_mut().unwrap().lock().map(
+    if let Err(err) = unsafe {
+        crate::memory::vmm::PAGEMAP.get_mut().unwrap().lock().map(
             mmio,
             phys_mmio,
             flag::RW,
             page_size::SMALL,
         )
     } {
-        panic!("could not map lapic mmio");
+        panic!("could not map lapic mmio - {}", err);
     }
 
     fence(Ordering::SeqCst);

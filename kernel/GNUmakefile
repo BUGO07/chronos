@@ -38,17 +38,6 @@ $(KARCH):
 	RUSTFLAGS=$(RUST_FLAGS) cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE)
 	cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/$$(cd target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR) && find -maxdepth 1 -perm -111 -type f) chronos-$(KARCH)
 
-.PHONY: test
-test:
-	RUSTFLAGS=$(RUST_FLAGS) cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE) --features tests
-	cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/$$(cd target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR) && find -maxdepth 1 -perm -111 -type f) chronos-test
-
-# add --features uacpi_test (crashes for some reason)
-.PHONY: uacpi-test
-uacpi-test:
-	RUSTFLAGS="-C relocation-model=static" cargo build --target $(RUST_TARGET) --profile release --features uacpi_test
-	cp target/$(RUST_TARGET)/release/$$(cd target/$(RUST_TARGET)/release && find -maxdepth 1 -perm -111 -type f) chronos-uacpi-test
-
 # Remove object files and the final executable.
 .PHONY: clean
 clean:

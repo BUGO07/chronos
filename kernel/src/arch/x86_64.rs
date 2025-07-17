@@ -5,7 +5,6 @@
 
 use crate::{
     arch::drivers::keyboard::keyboard_thread,
-    device::serial::serial_thread,
     print_centered,
     utils::shell::{cursor_thread, shell_thread},
 };
@@ -155,7 +154,7 @@ pub fn main_thread() -> ! {
     let pid0 = scheduler::get_proc_by_pid(0).unwrap();
 
     scheduler::thread::spawn(pid0, keyboard_thread as usize, "keyboard", false);
-    scheduler::thread::spawn(pid0, serial_thread as usize, "serial", false);
+    // scheduler::thread::spawn(pid0, serial_thread as usize, "serial", false);
 
     let shell_pid = scheduler::spawn_process(
         unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
@@ -204,9 +203,9 @@ pub fn _panic(info: &PanicInfo) -> ! {
     }
     #[cfg(not(feature = "tests"))]
     {
-        print!("\x1b[2J{}", crate::utils::logger::color::RED);
-        print_centered!(NOOO);
-        println!();
+        // print!("\x1b[2J{}", crate::utils::logger::color::RED);
+        // print_centered!(NOOO);
+        // println!();
         print_fill!("~", "Kernel Panic");
         print_centered!("", "~");
         // unnecessary but might change in the future

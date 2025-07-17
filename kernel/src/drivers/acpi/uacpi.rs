@@ -282,6 +282,7 @@ extern "C" fn uacpi_kernel_map(_addr: uacpi_phys_addr, _len: uacpi_size) -> *mut
                     .unwrap()
                     .lock()
                     .map(paddr + i, paddr + i, flag::RW, psize)
+                    .unwrap();
             };
         }
         _addr as *mut c_void
@@ -498,7 +499,7 @@ extern "C" fn uacpi_kernel_handle_firmware_request(
     UACPI_STATUS_OK
 }
 
-static mut UACPI_INTERRUPT_HANDLER_FN: Option<uacpi_interrupt_handler> = None;
+static mut UACPI_INTERRUPT_HANDLER: (Option<u8>, Option<uacpi_interrupt_handler>) = (None, None);
 static mut UACPI_INTERRUPT_CTX: Option<uacpi_handle> = None;
 
 #[unsafe(no_mangle)]
@@ -511,11 +512,13 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
     unsafe {
         let vector = (irq + 0x20) as u8;
 
-        UACPI_INTERRUPT_HANDLER_FN = Some(func);
+        UACPI_INTERRUPT_HANDLER = (Some(irq as u8), Some(func));
         UACPI_INTERRUPT_CTX = Some(ctx);
 
         #[cfg(target_arch = "x86_64")]
         crate::arch::interrupts::install_interrupt(vector, handle_uacpi_interrupt);
+        #[cfg(target_arch = "x86_64")]
+        crate::arch::interrupts::pic::unmask(irq as u8);
 
         *(out_irq_handle as *mut usize) = vector as usize;
         UACPI_STATUS_OK
@@ -525,12 +528,12 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
 #[cfg(target_arch = "x86_64")]
 fn handle_uacpi_interrupt(_stack_frame: *mut crate::arch::interrupts::StackFrame) {
     unsafe {
-        if let Some(handler) = UACPI_INTERRUPT_HANDLER_FN {
+        if let (Some(irq), Some(handler)) = UACPI_INTERRUPT_HANDLER {
             handler.unwrap()(UACPI_INTERRUPT_CTX.unwrap());
+            #[cfg(target_arch = "x86_64")]
+            crate::arch::interrupts::pic::send_eoi(irq);
         }
     }
-    #[cfg(target_arch = "x86_64")]
-    crate::arch::interrupts::pic::send_eoi(9);
 }
 
 #[unsafe(no_mangle)]
@@ -543,8 +546,10 @@ extern "C" fn uacpi_kernel_uninstall_interrupt_handler(
 
         #[cfg(target_arch = "x86_64")]
         crate::arch::interrupts::clear_interrupt(_vector);
+        #[cfg(target_arch = "x86_64")]
+        crate::arch::interrupts::pic::mask(_vector);
 
-        UACPI_INTERRUPT_HANDLER_FN = None;
+        UACPI_INTERRUPT_HANDLER = (None, None);
         UACPI_INTERRUPT_CTX = None;
 
         UACPI_STATUS_OK

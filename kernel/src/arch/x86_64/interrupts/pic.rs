@@ -55,7 +55,6 @@ pub fn mask(mut irq: u8) {
         irq -= 8;
     }
     outb(port, inb(port) | (1 << irq));
-    // debug!("masked irq {}", irq);
 }
 
 pub fn unmask(mut irq: u8) {
@@ -63,11 +62,11 @@ pub fn unmask(mut irq: u8) {
     if irq < 8 {
         port = PIC1_DATA;
     } else {
+        outb(PIC1_DATA, inb(PIC1_DATA) & !(1 << 2)); // cascade
         port = PIC2_DATA;
         irq -= 8;
     }
     outb(port, inb(port) & !(1 << irq));
-    // debug!("unmasked irq {}", irq);
 }
 
 pub fn init() {

@@ -26,12 +26,12 @@ pub fn init() {
 
     debug!("mapping hpet: 0x{:X} -> 0x{:X}", paddr, address);
     unsafe {
-        crate::memory::vmm::PAGEMAP.get_mut().unwrap().lock().map(
-            paddr + get_hhdm_offset(),
-            paddr,
-            flag::RW,
-            page_size::SMALL,
-        )
+        crate::memory::vmm::PAGEMAP
+            .get_mut()
+            .unwrap()
+            .lock()
+            .map(paddr + get_hhdm_offset(), paddr, flag::RW, page_size::SMALL)
+            .unwrap();
     };
 
     let capabilities = hpet_read(0x000);
