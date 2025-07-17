@@ -201,7 +201,7 @@ pub fn _print_fill(what: &str, with: &str, newline: bool) {
                                 x,
                                 with,
                                 x,
-                                if cols % 2 != 0 { what } else { "" }
+                                if !cols.is_multiple_of(2) { what } else { "" }
                             ))
                             .expect("Printing failed");
                     };
@@ -236,7 +236,7 @@ pub fn _print_centered(what: &str, with: &str, newline: bool) {
                                 space,
                                 line,
                                 space,
-                                if (cols % 2 != 0) ^ (line.len() % 2 != 0) {
+                                if !cols.is_multiple_of(2) ^ !line.len().is_multiple_of(2) {
                                     " "
                                 } else {
                                     "  "

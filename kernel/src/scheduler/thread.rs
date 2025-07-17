@@ -111,12 +111,16 @@ impl Thread {
             let mut locked = proc.lock();
             ustack = locked.next_stack_address();
             for i in (0..USER_STACK_SIZE).step_by(page_size::SMALL as usize) {
-                locked.pagemap.lock().map(
-                    ustack + i as u64,
-                    phys + i as u64,
-                    flag::RW | flag::USER,
-                    page_size::SMALL,
-                );
+                locked
+                    .pagemap
+                    .lock()
+                    .map(
+                        ustack + i as u64,
+                        phys + i as u64,
+                        flag::RW | flag::USER,
+                        page_size::SMALL,
+                    )
+                    .unwrap();
             }
         }
 

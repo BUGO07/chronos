@@ -90,7 +90,7 @@ pub fn busywait_ms(ms: u64) {
 }
 
 pub fn is_leap_year(year: u16) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 pub fn days_in_month(year: u16, month: u8) -> u32 {
