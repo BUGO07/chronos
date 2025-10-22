@@ -13,15 +13,16 @@ use crate::{
 pub mod vmm;
 
 pub const KERNEL_STACK_SIZE: usize = 64 * 1024;
-pub static KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
+pub static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
 
 pub const USER_STACK_SIZE: usize = 64 * 1024;
 pub const USER_STACK_BASE: usize = 0x800000;
 
 #[global_allocator]
-pub static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
-    Talc::new(unsafe { ClaimOnOom::new(Span::from_array((&raw const KERNEL_STACK).cast_mut())) })
-        .lock();
+pub static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> = {
+    let talc = unsafe { Talc::new(ClaimOnOom::new(Span::from_array(&mut KERNEL_STACK))) };
+    talc.lock()
+};
 
 pub struct TotalMemory {
     usable_bytes: u64,
@@ -46,9 +47,11 @@ pub fn init() {
         for entry in mem_map {
             if entry.entry_type == limine::memory_map::EntryType::USABLE {
                 debug!(
-                    "claiming 0x{:X}-0x{:X}...",
+                    "claiming virtual range: 0x{:X}-0x{:X} (phys 0x{:X}-0x{:X})...",
+                    entry.base + hhdm_offset,
+                    entry.base + entry.length + hhdm_offset,
                     entry.base,
-                    entry.base + hhdm_offset
+                    entry.base + entry.length
                 );
                 allocator
                     .claim(Span::from_base_size(
@@ -58,7 +61,7 @@ pub fn init() {
                     .ok();
                 TOTAL_MEMORY.usable_bytes += entry.length;
             } else if entry.entry_type == limine::memory_map::EntryType::RESERVED {
-                TOTAL_MEMORY.reserved_bytes += entry.length
+                TOTAL_MEMORY.reserved_bytes += entry.length;
             }
         }
 

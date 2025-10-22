@@ -13,6 +13,7 @@ use core::{
 
 use crate::{
     memory::{KERNEL_STACK_SIZE, USER_STACK_SIZE},
+    println,
     utils::{limine::get_hhdm_offset, spinlock::SpinLock},
 };
 use alloc::{
@@ -29,6 +30,246 @@ use crate::{
 };
 
 use super::thread::*;
+
+// Minimal ELF structures (64-bit little endian) used by the loader
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct ElfHeader {
+    e_ident: [u8; 16],
+    e_type: u16,
+    e_machine: u16,
+    e_version: u32,
+    e_entry: u64,
+    e_phoff: u64,
+    e_shoff: u64,
+    e_flags: u32,
+    e_ehsize: u16,
+    e_phentsize: u16,
+    e_phnum: u16,
+    e_shentsize: u16,
+    e_shnum: u16,
+    e_shstrndx: u16,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct ProgramHeader {
+    p_type: u32,
+    p_flags: u32,
+    p_offset: u64,
+    p_vaddr: u64,
+    p_paddr: u64,
+    p_filesz: u64,
+    p_memsz: u64,
+    p_align: u64,
+}
+
+#[derive(Clone, Default)]
+pub struct ElfLoadResult {
+    pub real_entry: u64,
+    pub interp_entry: u64,
+    pub phdr: u64,
+    pub phnum: u16,
+    pub phentsize: u16,
+    pub status: i32,
+}
+
+// ELF constants we need
+const PT_LOAD: u32 = 1;
+const PT_PHDR: u32 = 6;
+const PT_INTERP: u32 = 3;
+const ET_DYN: u16 = 3;
+
+use crate::memory::vmm::flag as PTE_FLAG;
+
+const ENOENT: i32 = 2;
+
+impl ElfHeader {
+    fn as_ptr<'a>(buf: *const u8) -> &'a Self {
+        unsafe { &*(buf as u64 as *const ElfHeader) }
+    }
+}
+
+impl ProgramHeader {
+    fn from_ptr<'a>(ptr: *const u8) -> &'a Self {
+        unsafe { &*(ptr as *const ProgramHeader) }
+    }
+}
+
+pub fn load_elf_from_buffer(proc: &mut Process, buf: &[u8]) -> ElfLoadResult {
+    let mut res = ElfLoadResult::default();
+
+    if buf.len() < core::mem::size_of::<ElfHeader>() {
+        res.status = -1;
+        return res;
+    }
+
+    let head = ElfHeader::as_ptr(buf.as_ptr());
+
+    if head.e_ident[0..4] != [0x7F, b'E', b'L', b'F'] {
+        res.status = ENOENT;
+        return res;
+    }
+
+    res.real_entry = head.e_entry;
+    res.interp_entry = head.e_entry;
+    res.phnum = head.e_phnum;
+    res.phentsize = head.e_phentsize;
+
+    let mut elf_base: u64 = u64::MAX;
+    let mut size: u64 = 0;
+    let _phdr_vaddr: u64 = 0;
+
+    for i in 0..head.e_phnum {
+        let off = head.e_phoff as usize + (head.e_phentsize as usize) * (i as usize);
+        if off + core::mem::size_of::<ProgramHeader>() > buf.len() {
+            continue;
+        }
+        let ph = ProgramHeader::from_ptr(unsafe { buf.as_ptr().add(off) });
+        if ph.p_type == PT_LOAD && ph.p_vaddr < elf_base {
+            elf_base = ph.p_vaddr;
+        }
+    }
+
+    for i in 0..head.e_phnum {
+        let off = head.e_phoff as usize + (head.e_phentsize as usize) * (i as usize);
+        if off + core::mem::size_of::<ProgramHeader>() > buf.len() {
+            continue;
+        }
+        let ph = ProgramHeader::from_ptr(unsafe { buf.as_ptr().add(off) });
+        if ph.p_type == PT_PHDR {
+            res.phdr = ph.p_vaddr;
+        } else if ph.p_type == PT_INTERP && (ph.p_offset as usize) < buf.len() {
+            let mut end = ph.p_offset as usize;
+            while end < buf.len() && buf[end] != 0 {
+                end += 1;
+            }
+            let interp = core::str::from_utf8(&buf[ph.p_offset as usize..end]).unwrap_or("");
+
+            if let Some(node) =
+                crate::drivers::fs::get_vfs().resolve_path(crate::drivers::fs::Path::new(interp))
+                && let Some(data) = node.read()
+            {
+                let _locked = proc.pagemap.lock();
+
+                let inner = load_elf_from_buffer(proc, data);
+                res.interp_entry = inner.real_entry;
+            }
+        }
+
+        if ph.p_type == PT_LOAD {
+            let end = ph.p_vaddr - elf_base + ph.p_memsz;
+            if end > size {
+                size = end;
+            }
+        }
+    }
+
+    let elf_vaddr = if head.e_type != ET_DYN {
+        let mut locked = proc.pagemap.lock();
+
+        let page_size = crate::memory::vmm::page_size::SMALL;
+        let flags = PTE_FLAG::PRESENT | PTE_FLAG::WRITE | PTE_FLAG::USER;
+        let mut off = 0u64;
+        while off < size {
+            let va = elf_base + off;
+
+            let phys = unsafe {
+                alloc::alloc::alloc_zeroed(
+                    core::alloc::Layout::from_size_align(page_size as usize, page_size as usize)
+                        .unwrap(),
+                ) as u64
+            } - crate::utils::limine::get_hhdm_offset();
+            locked.map(va, phys, flags, page_size).unwrap();
+            off += page_size;
+        }
+        elf_base
+    } else {
+        let mut locked = proc.pagemap.lock();
+        let base = proc.next_stack_address();
+        let page_size = crate::memory::vmm::page_size::SMALL;
+        let flags = PTE_FLAG::PRESENT | PTE_FLAG::WRITE | PTE_FLAG::USER;
+        let mut off = 0u64;
+        while off < size {
+            let va = base + off;
+            let phys = unsafe {
+                alloc::alloc::alloc_zeroed(
+                    core::alloc::Layout::from_size_align(page_size as usize, page_size as usize)
+                        .unwrap(),
+                ) as u64
+            } - crate::utils::limine::get_hhdm_offset();
+            locked.map(va, phys, flags, page_size).unwrap();
+            off += page_size;
+        }
+        res.real_entry = base + head.e_entry;
+        base
+    };
+
+    let hhdm = crate::utils::limine::get_hhdm_offset();
+    for i in 0..head.e_phnum {
+        let off = head.e_phoff as usize + (head.e_phentsize as usize) * (i as usize);
+        if off + core::mem::size_of::<ProgramHeader>() > buf.len() {
+            continue;
+        }
+        let ph = ProgramHeader::from_ptr(unsafe { buf.as_ptr().add(off) });
+        if ph.p_type == PT_LOAD {
+            let dest = if head.e_type != ET_DYN {
+                elf_vaddr as usize + (ph.p_vaddr - elf_base) as usize
+            } else {
+                elf_vaddr as usize + ph.p_vaddr as usize
+            };
+
+            unsafe {
+                let dst_ptr = (dest + hhdm as usize) as *mut u8;
+
+                for j in 0..(ph.p_memsz as usize) {
+                    core::ptr::write_volatile(dst_ptr.add(j), 0);
+                }
+
+                if (ph.p_offset as usize) + (ph.p_filesz as usize) <= buf.len() {
+                    core::ptr::copy_nonoverlapping(
+                        buf.as_ptr().add(ph.p_offset as usize),
+                        dst_ptr,
+                        ph.p_filesz as usize,
+                    );
+                }
+            }
+        }
+    }
+
+    res.status = 0;
+    res
+}
+
+pub fn loadelf_from_path(
+    proc_arc: &'static Arc<SpinLock<Process>>,
+    path: &str,
+    _argv: &[&str],
+    _envp: &[&str],
+) -> i32 {
+    let mut proc_locked = proc_arc.lock();
+
+    let node = match crate::drivers::fs::get_vfs().resolve_path(crate::drivers::fs::Path::new(path))
+    {
+        Some(n) => n,
+        None => return ENOENT,
+    };
+    let data = match node.read() {
+        Some(d) => d,
+        None => return ENOENT,
+    };
+
+    let elfload = load_elf_from_buffer(&mut proc_locked, data);
+    if elfload.status != 0 {
+        return elfload.status;
+    }
+
+    drop(proc_locked);
+
+    spawn(proc_arc, elfload.interp_entry as usize, "main", true);
+
+    0
+}
 
 pub static mut SCHEDULER: OnceCell<Scheduler> = OnceCell::new();
 

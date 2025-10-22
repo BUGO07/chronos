@@ -42,12 +42,10 @@ unsafe impl Send for Pagemap {}
 unsafe impl Sync for Pagemap {}
 
 #[repr(C)]
-#[repr(packed)]
 pub struct Table {
     entries: [u64; 512],
 }
 
-#[derive(Copy, Clone)]
 pub struct Pagemap {
     pub top_level: *mut Table,
 }
@@ -67,13 +65,14 @@ impl Pagemap {
 
     pub fn map(&mut self, virt: u64, phys: u64, mut flags: u64, psize: u64) -> Result<(), String> {
         let hhdm = get_hhdm_offset();
-        if is_valid_addr(phys, hhdm) {
+        if is_hhdm_addr(phys, hhdm) {
             return Err(format!("illegal physical address: 0x{phys:X}"));
         }
-        let pml4_entry = (virt & (0x1ff << 39)) >> 39;
-        let pml3_entry = (virt & (0x1ff << 30)) >> 30;
-        let pml2_entry = (virt & (0x1ff << 21)) >> 21;
-        let pml1_entry = (virt & (0x1ff << 12)) >> 12;
+
+        let pml4_entry = (virt >> 39) & 0x1ff;
+        let pml3_entry = (virt >> 30) & 0x1ff;
+        let pml2_entry = (virt >> 21) & 0x1ff;
+        let pml1_entry = (virt >> 12) & 0x1ff;
 
         let pml4 = (self.top_level as u64 + hhdm) as *mut Table;
 
@@ -82,9 +81,15 @@ impl Pagemap {
             return Err("pml3 is null".to_string());
         }
         if psize == page_size::LARGE {
+            if (phys & (page_size::LARGE - 1)) != 0 || (virt & (page_size::LARGE - 1)) != 0 {
+                return Err(format!(
+                    "addresses must be {:#X}-aligned for large page",
+                    page_size::LARGE
+                ));
+            }
             flags |= flag::LPAGES;
             unsafe {
-                (*pml3).entries[pml3_entry as usize] = phys | flags;
+                (*pml3).entries[pml3_entry as usize] = (phys & 0x000FFFFFFFFFF000) | flags;
             }
             return Ok(());
         }
@@ -116,38 +121,47 @@ impl Pagemap {
 
 fn alloc_table() -> *mut Table {
     unsafe {
-        (alloc::alloc::alloc_zeroed(Layout::from_size_align(0x1000, 0x1000).unwrap()) as u64
-            - get_hhdm_offset()) as *mut Table
+        let virt =
+            alloc::alloc::alloc_zeroed(Layout::from_size_align(0x1000, 0x1000).unwrap()) as u64;
+        let hhdm = get_hhdm_offset();
+        if virt < hhdm {
+            return null_mut();
+        }
+        (virt - hhdm) as *mut Table
     }
 }
 
 fn get_next_level(top_level: *mut Table, idx: u64, allocate: bool) -> *mut Table {
     unsafe {
+        const ADDR_MASK: u64 = 0x000FFFFFFFFFF000;
         let hhdm = get_hhdm_offset();
-        let entry = top_level.cast::<u64>().add(idx as usize);
+        let entry_ptr = (top_level as *mut u64).add(idx as usize);
 
-        if is_valid_addr(*entry, hhdm) {
-            error!("illegal entry: 0x{:X}", *entry);
+        let raw = core::ptr::read_volatile(entry_ptr);
+        let addr = raw & ADDR_MASK;
+
+        if addr != 0 && addr >= hhdm {
+            error!("entry contains HHDM/virtual address: 0x{:X}", raw);
             return null_mut();
         }
 
-        if *entry & flag::PRESENT != 0 {
-            return (*entry & 0x000FFFFFFFFFF000).checked_add(hhdm).unwrap_or(0) as *mut Table;
+        if raw & flag::PRESENT != 0 {
+            return (addr.checked_add(hhdm).unwrap_or(0)) as *mut Table;
         }
 
         if !allocate {
             return null_mut();
         }
 
-        let next_level = alloc_table() as u64;
-        if next_level == 0 {
+        let next_phys = alloc_table() as u64;
+        if next_phys == 0 {
             error!("couldn't allocate page table");
             return null_mut();
         }
 
-        *entry = next_level | flag::RW | flag::USER;
+        core::ptr::write_volatile(entry_ptr, next_phys | flag::RW | flag::USER);
 
-        (next_level + hhdm) as *mut Table
+        (next_phys + hhdm) as *mut Table
     }
 }
 
@@ -169,7 +183,6 @@ pub fn init() {
             continue;
         }
 
-        // ! hard setting this to LARGE stops my laptop from crashing
         let psize = if entry.length >= page_size::LARGE {
             page_size::LARGE
         } else if entry.length >= page_size::MEDIUM {
@@ -189,7 +202,7 @@ pub fn init() {
         );
 
         for i in (base..end).step_by(psize as usize) {
-            if is_valid_addr(i, hhdm) {
+            if is_hhdm_addr(i, hhdm) {
                 error!("illegal physical address: 0x{:X}", i);
                 continue;
             }
@@ -223,6 +236,6 @@ pub fn init() {
     info!("done");
 }
 
-fn is_valid_addr(addr: u64, hhdm: u64) -> bool {
-    addr != 0 && addr > hhdm && addr <= !0 - hhdm
+fn is_hhdm_addr(addr: u64, hhdm: u64) -> bool {
+    addr != 0 && addr >= hhdm
 }

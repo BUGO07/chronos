@@ -285,6 +285,8 @@ pub fn init() {
             file.get_path(),
             str::from_utf8(file.read().unwrap()).unwrap()
         );
+        let inttest = home.create_file("int80test").unwrap();
+        inttest.write(include_bytes!("../../../../int80test").to_vec());
         VFS.set(vfs).ok();
         let file = get_vfs()
             .get_root_mut()

@@ -163,6 +163,8 @@ pub fn main_thread() -> ! {
     let shell_proc = scheduler::get_proc_by_pid(shell_pid).unwrap();
     scheduler::thread::spawn(shell_proc, shell_thread as usize, "main", false);
     scheduler::thread::spawn(shell_proc, cursor_thread as usize, "cursor", false);
+    scheduler::loadelf_from_path(shell_proc, "/home/int80test", &["asd"], &[]);
+    // scheduler::thread::spawn(shell_proc, elfload.interp_entry as usize, "inttest", true);
 
     // * loading userspace binary
     // let addr =
