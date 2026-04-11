@@ -38,6 +38,8 @@ pub fn shell_thread() -> ! {
         let shell = unsafe { SHELL.get_mut().unwrap() };
         if let Some((dc, keyboard_state)) = shell.event_queue.pop_front() {
             shell.key_event(dc, keyboard_state);
+        } else {
+            crate::scheduler::thread::yld();
         }
     }
 }

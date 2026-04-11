@@ -29,8 +29,8 @@ pub fn keyboard_interrupt_handler(_stack_frame: *mut StackFrame) {
 
 pub fn keyboard_thread() -> ! {
     crate::arch::interrupts::pic::unmask(1);
-    let keyboard_state = unsafe { KEYBOARD_STATE.get_mut() };
     loop {
+        let keyboard_state = unsafe { KEYBOARD_STATE.get_mut() };
         if !keyboard_state.scancodes.is_empty() {
             let scancode = keyboard_state.scancodes.pop_front().unwrap();
             let keys_down = &mut keyboard_state.keys_down;
@@ -51,6 +51,8 @@ pub fn keyboard_thread() -> ! {
                     }
                 }
             }
+        } else {
+            crate::scheduler::thread::yld();
         }
     }
 }
