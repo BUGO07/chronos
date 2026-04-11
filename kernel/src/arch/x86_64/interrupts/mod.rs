@@ -213,14 +213,14 @@ extern "C" fn isr_handler(regs: *mut StackFrame) {
             match registers.vector {
                 1..=3 => {
                     debug!(
-                        "exception: {}, {:?}",
+                        "exception: {},\n{:#018x?}",
                         EXCEPTION_NAMES[registers.vector as usize], registers
                     );
                     return;
                 }
                 _ => {
                     panic!(
-                        "exception: {}, {:?}",
+                        "exception: {},\n{:#018x?}",
                         EXCEPTION_NAMES[registers.vector as usize], registers
                     );
                 }

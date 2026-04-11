@@ -178,7 +178,6 @@ fn get_next_level(
         let entry = &mut *current_level.add(idx as usize);
 
         if *entry & flag::PRESENT != 0 && is_table(*entry) {
-            // Entry is already a table pointer — follow it.
             let addr = (*entry & flag::PADDR_MASK)
                 .checked_add(hhdm)
                 .ok_or("vmm: address overflow in get_next_level")?;
@@ -186,27 +185,21 @@ fn get_next_level(
         }
 
         if is_large(*entry) {
-            // Splitting an existing large page into smaller pages.
-            if level_idx == 0 || level_idx > 3 {
+            if level_idx == 0 || level_idx >= 3 {
                 panic!("vmm: unexpected level {} in get_next_level", level_idx);
             }
 
-            let old_page_size = PAGE_SIZES[level_idx];
+            let old_page_size = PAGE_SIZES[level_idx + 1];
             let old_flags = pte_to_flags(*entry);
             let old_phys = *entry & flag::PADDR_MASK;
             let old_virt = virt & !(old_page_size - 1);
 
-            // Allocate a new table to replace the large page.
             let new_table = alloc_table() as u64;
             *entry = new_table | flag::TABLE_FLAGS;
 
-            // Determine what size to use for the split mappings.
-            // Use the level below (e.g., splitting 1G into 2M pages).
-            let split_level = level_idx - 1;
-            let split_size = PAGE_SIZES[split_level];
+            let split_size = PAGE_SIZES[level_idx];
             let split_flags = flag::PRESENT | old_flags;
 
-            // Re-create the old mapping with smaller pages.
             let mut offset = 0u64;
             while offset < old_page_size {
                 pagemap.map(
@@ -218,13 +211,11 @@ fn get_next_level(
                 offset += split_size;
             }
 
-            // Now follow the newly created table for the current mapping.
             let entry_val = *current_level.add(idx as usize);
             let addr = (entry_val & flag::PADDR_MASK) + hhdm;
             return Ok(addr as *mut u64);
         }
 
-        // No entry — allocate a new table.
         let next_level = alloc_table() as u64;
         if next_level == 0 {
             return Err("vmm: couldn't allocate page table");

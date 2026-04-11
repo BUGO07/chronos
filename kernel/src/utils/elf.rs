@@ -7,7 +7,7 @@ use core::{alloc::Layout, ffi::c_void};
 
 use crate::{
     debug,
-    memory::vmm::{flag, page_size, Pagemap},
+    memory::vmm::{Pagemap, flag, page_size},
     utils::{asm::mem::memcpy, limine::get_hhdm_offset},
 };
 
@@ -96,9 +96,7 @@ pub fn load_elf(data: &[u8], pagemap: &mut Pagemap) -> Result<ElfInfo, &'static 
     let hhdm = get_hhdm_offset();
 
     for i in 0..ph_count {
-        let phdr = unsafe {
-            &*(data.as_ptr().add(ph_offset + i * ph_size) as *const Elf64Phdr)
-        };
+        let phdr = unsafe { &*(data.as_ptr().add(ph_offset + i * ph_size) as *const Elf64Phdr) };
 
         if phdr.p_type != PT_LOAD {
             continue;
@@ -130,7 +128,9 @@ pub fn load_elf(data: &[u8], pagemap: &mut Pagemap) -> Result<ElfInfo, &'static 
         let total_pages = (vaddr_end - vaddr_base) as usize;
 
         let alloc_ptr = unsafe {
-            alloc::alloc::alloc_zeroed(Layout::from_size_align(total_pages, page_size::SMALL as usize).unwrap())
+            alloc::alloc::alloc_zeroed(
+                Layout::from_size_align(total_pages, page_size::SMALL as usize).unwrap(),
+            )
         };
         if alloc_ptr.is_null() {
             return Err("allocation failed");
@@ -139,7 +139,12 @@ pub fn load_elf(data: &[u8], pagemap: &mut Pagemap) -> Result<ElfInfo, &'static 
 
         for offset in (0..total_pages as u64).step_by(page_size::SMALL as usize) {
             pagemap
-                .map(vaddr_base + offset, phys_base + offset, flags, page_size::SMALL)
+                .map(
+                    vaddr_base + offset,
+                    phys_base + offset,
+                    flags,
+                    page_size::SMALL,
+                )
                 .map_err(|_| "failed to map ELF segment")?;
         }
 

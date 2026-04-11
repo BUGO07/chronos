@@ -7,7 +7,7 @@ use core::{
     alloc::Layout,
     ffi::{CStr, c_void},
     ptr::null_mut,
-    sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicUsize, Ordering},
+    sync::atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering},
 };
 
 use alloc::{boxed::Box, collections::btree_map::BTreeMap};
@@ -591,19 +591,16 @@ extern "C" fn uacpi_kernel_uninstall_interrupt_handler(
     UACPI_STATUS_OK
 }
 
-static UACPI_INTS_SHOULD_RESTORE: AtomicBool = AtomicBool::new(false);
-
 #[unsafe(no_mangle)]
-extern "C" fn uacpi_kernel_disable_interrupts() {
-    UACPI_INTS_SHOULD_RESTORE.store(crate::utils::asm::int_status(), Ordering::SeqCst);
+extern "C" fn uacpi_kernel_disable_interrupts() -> uacpi_interrupt_state {
+    let state = crate::utils::asm::int_status();
     crate::utils::asm::toggle_ints(false);
+    state as _
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn uacpi_kernel_restore_interrupts() {
-    if UACPI_INTS_SHOULD_RESTORE.swap(false, Ordering::SeqCst) {
-        crate::utils::asm::toggle_ints(true);
-    }
+extern "C" fn uacpi_kernel_restore_interrupts(state: uacpi_interrupt_state) {
+    crate::utils::asm::toggle_ints(state != 0);
 }
 
 #[unsafe(no_mangle)]

@@ -8,7 +8,7 @@ use crate::{
     print_centered,
     utils::shell::{cursor_thread, shell_thread},
 };
-use alloc::{format, string::ToString, vec::Vec};
+use alloc::{format, vec::Vec};
 use core::{
     panic::PanicInfo,
     sync::atomic::{AtomicU64, Ordering},
@@ -209,31 +209,7 @@ pub fn _panic(info: &PanicInfo) -> ! {
         // println!();
         print_fill!("~", "Kernel Panic");
         print_centered!("", "~");
-        // unnecessary but might change in the future
-        let msg = info.message().to_string();
-        if let Some(location) = info.location() {
-            print_centered!(
-                format!(
-                    "ERROR: panicked at {}:{}:{} {}{}\n",
-                    location.file(),
-                    location.line(),
-                    location.column(),
-                    if msg.is_empty() {
-                        "without a message."
-                    } else {
-                        "with message: "
-                    },
-                    msg,
-                )
-                .as_str(),
-                "~"
-            );
-        } else {
-            print_centered!(
-                format!("ERROR: panicked with message: {}\n", info.message()).as_str(),
-                "~"
-            );
-        }
+        print_centered!(format!("ERROR: {info}\n").as_str(), "~");
         #[cfg(debug_assertions)]
         {
             let mut rbp: *const StackTrace;
@@ -254,47 +230,7 @@ pub fn _panic(info: &PanicInfo) -> ! {
                 }
             }
         }
-        print_centered!("\nstopping code execution and dumping registers\n", "~");
-        let registers = crate::utils::asm::dump_regs();
-        print_centered!(
-            format!(
-                "r15:    0x{0:016X}  rsi:    0x{10:016X}\n\
-                 r14:    0x{1:016X}  rdx:    0x{11:016X}\n\
-                 r13:    0x{2:016X}  rcx:    0x{12:016X}\n\
-                 r12:    0x{3:016X}  rbx:    0x{13:016X}\n\
-                 r11:    0x{4:016X}  rax:    0x{14:016X}\n\
-                 r10:    0x{5:016X}  rip:    0x{15:016X}\n\
-                 r9:     0x{6:016X}  cs:     0x{16:016X}\n\
-                 r8:     0x{7:016X}  rflags: 0x{17:016X}\n\
-                 rbp:    0x{8:016X}  rsp:    0x{18:016X}\n\
-                 rdi:    0x{9:016X}  ss:     0x{19:016X}\n\
-                 cr2:    0x{20:016X}  cr3:    0x{21:016X}\n",
-                registers.r15,
-                registers.r14,
-                registers.r13,
-                registers.r12,
-                registers.r11,
-                registers.r10,
-                registers.r9,
-                registers.r8,
-                registers.rbp,
-                registers.rdi,
-                registers.rsi,
-                registers.rdx,
-                registers.rcx,
-                registers.rbx,
-                registers.rax,
-                registers.rip,
-                registers.cs,
-                registers.rflags,
-                registers.rsp,
-                registers.ss,
-                registers.cr2,
-                registers.cr3
-            )
-            .as_str(),
-            "~"
-        );
+        println!();
         print_fill!("~", "", false);
         print!("{}", crate::utils::logger::color::RESET);
     }

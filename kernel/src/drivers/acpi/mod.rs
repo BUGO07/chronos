@@ -55,7 +55,7 @@ pub fn init() {
                     .get_mut()
                     .unwrap()
                     .lock()
-                    .map(virt + i, addr + i, flag::RW | flag::USER, page_size::MEDIUM)
+                    .map(virt + i, addr + i, flag::RW, page_size::MEDIUM)
                     .ok();
             }
 
