@@ -85,6 +85,15 @@ impl core::fmt::Display for Path {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum FsError {
+    NotFound,
+    AlreadyExists,
+    NotADirectory,
+    IsADirectory,
+    InvalidPath,
+}
+
 pub struct Directory {
     pub children: Vec<Box<dyn VfsNode>>,
     pub metadata: VfsNodeMetadata,

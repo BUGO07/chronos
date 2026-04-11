@@ -74,8 +74,40 @@ impl<T> Mutex<T> {
         }
     }
 
-    /// # Safety
-    /// Caller must ensure no `MutexGuard` for this mutex is currently alive.
+    pub fn lock_no_guard(&self) {
+        #[cfg(target_arch = "x86_64")]
+        let mut backoff = 0u32;
+        loop {
+            if self
+                .locked
+                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                return;
+            }
+
+            #[cfg(target_arch = "x86_64")]
+            if scheduler::is_initialized() {
+                if backoff < 10 {
+                    thread::yld();
+                } else {
+                    thread::sleep((1u64 << (backoff - 10)).min(1_000_000));
+                }
+                backoff += 1;
+            } else {
+                spin_loop();
+            }
+            #[cfg(target_arch = "aarch64")]
+            spin_loop();
+        }
+    }
+
+    pub fn try_lock_no_guard(&self) -> bool {
+        self.locked
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+    }
+
     pub unsafe fn force_unlock(&self) {
         self.locked.store(false, Ordering::Release);
     }

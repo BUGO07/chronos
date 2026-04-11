@@ -41,8 +41,8 @@ static NEXT_GLOBAL_TID: AtomicU64 = AtomicU64::new(1);
 
 pub struct Thread {
     name: &'static str,
-    tid: u64,
-    gtid: u64,
+    pub tid: u64,
+    pub gtid: u64,
     pub kstack: u64,
     pub ustack: u64,
     pub kstack_alloc: u64,
@@ -183,10 +183,6 @@ impl Thread {
         self.name
     }
 
-    pub fn get_tid(&self) -> u64 {
-        self.tid
-    }
-
     pub fn get_parent(&self) -> &Weak<SpinLock<Process>> {
         &self.parent
     }
@@ -208,7 +204,7 @@ pub fn spawn(
 ) -> u64 {
     let thread = Arc::new(SpinLock::new(Thread::new(proc, func, name, user)));
     proc.lock().get_children_mut().push(thread.clone());
-    let tid = thread.lock().get_tid();
+    let tid = thread.lock().tid;
     enqueue(thread);
     tid
 }
@@ -276,5 +272,5 @@ pub fn idle0() -> &'static Arc<SpinLock<Thread>> {
 }
 
 pub fn current_thread() -> Option<Arc<SpinLock<Thread>>> {
-    get_scheduler().current.clone()
+    get_scheduler_safe().and_then(|x| x.current.clone())
 }

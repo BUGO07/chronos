@@ -50,6 +50,16 @@ impl<T: ?Sized> SpinLock<T> {
         }
     }
 
+    pub fn lock_no_guard(&self) {
+        while self
+            .lock
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+    }
+
     pub unsafe fn force_unlock(&self) {
         self.lock.store(false, Ordering::Release);
     }
@@ -69,7 +79,10 @@ impl<T: Sized + Debug> Debug for SpinLock<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.try_lock() {
             Some(guard) => f.debug_struct("SpinLock").field("inner", &*guard).finish(),
-            None => f.debug_struct("SpinLock").field("inner", &"<locked>").finish(),
+            None => f
+                .debug_struct("SpinLock")
+                .field("inner", &"<locked>")
+                .finish(),
         }
     }
 }

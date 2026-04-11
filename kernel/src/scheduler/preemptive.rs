@@ -15,11 +15,7 @@ use crate::{
     memory::{KERNEL_STACK_SIZE, USER_STACK_SIZE},
     utils::spinlock::SpinLock,
 };
-use alloc::{
-    collections::vec_deque::VecDeque,
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{collections::vec_deque::VecDeque, sync::Arc, vec::Vec};
 
 use crate::{
     arch::{drivers::time::preferred_timer_ns, interrupts::StackFrame, system::lapic},
@@ -225,7 +221,7 @@ pub fn enqueue(thread: Arc<SpinLock<Thread>>) {
 
 #[inline(always)]
 pub fn next_thread() -> Option<Arc<SpinLock<Thread>>> {
-    get_scheduler().queue.pop_front()
+    get_scheduler_safe().and_then(|x| x.queue.pop_front())
 }
 
 pub fn kill_process(pid: u64) -> bool {
@@ -279,23 +275,22 @@ pub fn get_scheduler() -> &'static mut Scheduler {
     unsafe { SCHEDULER.get_mut().unwrap() }
 }
 
+pub fn get_scheduler_safe() -> Option<&'static mut Scheduler> {
+    unsafe { SCHEDULER.get_mut() }
+}
+
 pub fn get_proc_by_pid(pid: u64) -> Option<&'static Arc<SpinLock<Process>>> {
-    get_scheduler()
-        .processes
-        .iter()
-        .find(|p| p.lock().pid == pid)
+    get_scheduler_safe().and_then(|x| x.processes.iter().find(|p| p.lock().pid == pid))
 }
 
 pub fn get_proc_by_name(name: &str) -> Option<&'static Arc<SpinLock<Process>>> {
-    get_scheduler()
-        .processes
-        .iter()
-        .find(|p| p.lock().name == name)
+    get_scheduler_safe().and_then(|x| x.processes.iter().find(|p| p.lock().name == name))
 }
 
 pub fn current_process() -> Option<Arc<SpinLock<Process>>> {
-    get_scheduler()
-        .current
-        .as_ref()
-        .and_then(|x| x.lock().get_parent().upgrade())
+    get_scheduler_safe().and_then(|x| {
+        x.current
+            .as_ref()
+            .and_then(|x| x.lock().get_parent().upgrade())
+    })
 }

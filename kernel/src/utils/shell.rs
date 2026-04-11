@@ -486,10 +486,10 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                     return;
                 }
             };
-            let vfs = unsafe { fs::VFS.get_mut().unwrap() };
+            let vfs = fs::get_vfs();
             for child in vfs
                 .resolve_path(path)
-                .unwrap_or(vfs.resolve_path(cwd).unwrap()) // goofy ahh
+                .unwrap_or_else(|| vfs.resolve_path(cwd).unwrap())
                 .get_children()
             {
                 print!(
@@ -513,21 +513,16 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                 println!("mkdir: what name dumass");
                 return;
             }
+            let cwd = crate::scheduler::current_process()
+                .unwrap()
+                .lock()
+                .get_cwd()
+                .clone();
+            let vfs = fs::get_vfs();
+            let dir = vfs.resolve_path_mut(cwd).unwrap();
             for arg in args {
-                unsafe {
-                    fs::VFS
-                        .get_mut()
-                        .unwrap()
-                        .resolve_path_mut(
-                            crate::scheduler::current_process()
-                                .unwrap()
-                                .lock()
-                                .get_cwd()
-                                .clone(),
-                        )
-                        .unwrap()
-                        .create_dir(arg)
-                        .unwrap();
+                if dir.create_dir(arg).is_none() {
+                    println!("mkdir: {arg}: already exists");
                 }
             }
         }
@@ -537,21 +532,16 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                 println!("touch: what name dumass");
                 return;
             }
+            let cwd = crate::scheduler::current_process()
+                .unwrap()
+                .lock()
+                .get_cwd()
+                .clone();
+            let vfs = fs::get_vfs();
+            let dir = vfs.resolve_path_mut(cwd).unwrap();
             for arg in args {
-                unsafe {
-                    fs::VFS
-                        .get_mut()
-                        .unwrap()
-                        .resolve_path_mut(
-                            crate::scheduler::current_process()
-                                .unwrap()
-                                .lock()
-                                .get_cwd()
-                                .clone(),
-                        )
-                        .unwrap()
-                        .create_file(arg)
-                        .unwrap();
+                if dir.create_file(arg).is_none() {
+                    println!("touch: {arg}: already exists");
                 }
             }
         }
@@ -562,19 +552,17 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                 return;
             }
             let path = fs::Path::new(args[0]);
-            let vfs = unsafe { fs::VFS.get_mut().unwrap() };
-            if let Some(file) = vfs
-                .resolve_path(
-                    crate::scheduler::current_process()
-                        .unwrap()
-                        .lock()
-                        .get_cwd()
-                        .clone(),
-                )
+            let cwd = crate::scheduler::current_process()
                 .unwrap()
-                .resolve_path(path.clone())
-            {
-                println!("{}", str::from_utf8(file.read().unwrap()).unwrap());
+                .lock()
+                .get_cwd()
+                .clone();
+            let vfs = fs::get_vfs();
+            if let Some(file) = vfs.resolve_path(cwd).unwrap().resolve_path(path.clone()) {
+                match file.read() {
+                    Some(data) => println!("{}", str::from_utf8(data).unwrap()),
+                    None => println!("cat: {}: is a directory", path),
+                }
             } else {
                 println!("cat: no such file");
             }
@@ -586,25 +574,30 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                 return;
             }
             let path = fs::Path::new(args[0]);
-            if let Some(node) = unsafe {
-                fs::VFS
-                    .get_mut()
-                    .unwrap()
-                    .resolve_path_mut(
-                        crate::scheduler::current_process()
-                            .unwrap()
-                            .lock()
-                            .get_cwd()
-                            .clone(),
-                    )
-                    .unwrap()
-                    .resolve_path_mut(path.clone())
-            } {
-                node.get_parent_mut()
-                    .unwrap()
-                    .get_children_mut()
-                    .retain(|x| x.get_name() != path.get_name());
-            } else {
+            let cwd = crate::scheduler::current_process()
+                .unwrap()
+                .lock()
+                .get_cwd()
+                .clone();
+            let vfs = fs::get_vfs();
+            let target_path = match vfs
+                .resolve_path(cwd.clone())
+                .unwrap()
+                .resolve_path(path.clone())
+            {
+                Some(node) => node.get_path().clone(),
+                None => {
+                    println!("rm: no such item");
+                    return;
+                }
+            };
+            let name = target_path.get_name().to_string();
+            let parent_path = target_path.get_parent();
+            let Some(parent) = vfs.resolve_path_mut(parent_path) else {
+                println!("rm: no such item");
+                return;
+            };
+            if !parent.remove_child(&name) {
                 println!("rm: no such item");
             }
         }
@@ -755,7 +748,7 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                             let t = thread.lock();
                             println!(
                                 "  Thread [{}] '{}': {:?}",
-                                t.get_tid(),
+                                t.tid,
                                 t.get_name(),
                                 t.get_status()
                             );

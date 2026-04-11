@@ -38,6 +38,22 @@ impl Vfs {
         self.root.resolve_path_mut(path)
     }
 }
+
+fn canonicalize_components(path: &Path) -> Option<Vec<&str>> {
+    let mut out: Vec<&str> = Vec::new();
+    for part in path.as_str().split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            out.pop()?;
+            continue;
+        }
+        out.push(part);
+    }
+    Some(out)
+}
+
 pub trait VfsNode: core::fmt::Debug {
     fn get_permissions(&self) -> &Permissions;
     fn get_permissions_mut(&mut self) -> &mut Permissions;
@@ -52,23 +68,30 @@ pub trait VfsNode: core::fmt::Debug {
     }
     fn get_path(&self) -> &Path;
     fn get_name(&self) -> &'_ str;
-    fn get_parent(&self) -> Option<&dyn VfsNode> {
-        get_vfs().resolve_path(self.get_path().get_parent())
-    }
-    fn get_parent_mut(&mut self) -> Option<&mut dyn VfsNode> {
-        get_vfs().resolve_path_mut(self.get_path().get_parent())
-    }
     fn get_child(&self, name: &str) -> Option<&dyn VfsNode>; // folder-only
     fn get_child_mut(&mut self, name: &str) -> Option<&mut Box<dyn VfsNode>>; // folder-only
     fn get_children(&self) -> Vec<&dyn VfsNode>; // folder-only
-    fn get_children_mut(&mut self) -> &mut Vec<Box<dyn VfsNode>>; // folder-only
     fn resolve_path(&self, path: Path) -> Option<&dyn VfsNode>; // folder-only
     fn resolve_path_mut(&mut self, path: Path) -> Option<&mut dyn VfsNode>; // folder-only
     fn create_dir(&mut self, name: &str) -> Option<&mut Box<dyn VfsNode>>; // folder-only
     fn create_file(&mut self, name: &str) -> Option<&mut Box<dyn VfsNode>>; // folder-only
-    fn remove_child(&mut self, name: &str); // folder-only
-    fn read(&self) -> Option<&Vec<u8>>; // file-only
-    fn write(&mut self, data: Vec<u8>); // file-only
+    fn remove_child(&mut self, name: &str) -> bool; // folder-only
+
+    // File-only ops. Directories implement these as no-ops / None.
+    fn size(&self) -> u64;
+    fn read(&self) -> Option<&[u8]>;
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> Option<usize>;
+    fn write_at(&mut self, offset: u64, buf: &[u8]) -> Option<usize>;
+    fn truncate(&mut self, len: u64) -> bool;
+    fn write_all(&mut self, data: &[u8]) -> bool {
+        if !self.truncate(0) {
+            return false;
+        }
+        if data.is_empty() {
+            return true;
+        }
+        self.write_at(0, data).is_some()
+    }
 }
 
 impl VfsNode for Directory {
@@ -94,49 +117,19 @@ impl VfsNode for Directory {
         self.path.get_name()
     }
     fn resolve_path(&self, path: Path) -> Option<&dyn VfsNode> {
-        let mut current = self as &dyn VfsNode;
-        let string = path.to_string();
-        if string == "/" {
-            return Some(get_vfs().get_root());
-        }
-        for part in string.split("/") {
-            if part.is_empty() || part == "." {
-                continue;
-            } else if part == ".." {
-                if let Some(parent) = current.get_parent() {
-                    current = parent;
-                } else {
-                    return None;
-                }
-            } else if let Some(child) = current.get_child(part) {
-                current = child;
-            } else {
-                return None;
-            }
+        let components = canonicalize_components(&path)?;
+        let mut current: &dyn VfsNode = self;
+        for part in components {
+            current = current.get_child(part)?;
         }
         Some(current)
     }
     fn resolve_path_mut(&mut self, path: Path) -> Option<&mut dyn VfsNode> {
-        let mut current = self as &mut dyn VfsNode;
-
-        let string = path.to_string();
-        if string == "/" {
-            return Some(get_vfs().get_root_mut().as_mut());
-        }
-        for part in string.split("/") {
-            if part.is_empty() || part == "." {
-                continue;
-            } else if part == ".." {
-                if let Some(parent) = current.get_parent_mut() {
-                    current = parent;
-                } else {
-                    return None;
-                }
-            } else if let Some(child) = current.get_child_mut(part) {
-                current = child.as_mut();
-            } else {
-                return None;
-            }
+        let components = canonicalize_components(&path)?;
+        let mut current: &mut dyn VfsNode = self;
+        for part in components {
+            let child = current.get_child_mut(part)?;
+            current = child.as_mut();
         }
         Some(current)
     }
@@ -152,26 +145,42 @@ impl VfsNode for Directory {
     fn get_children(&self) -> Vec<&dyn VfsNode> {
         self.children.iter().map(|c| c.as_ref()).collect()
     }
-    fn get_children_mut(&mut self) -> &mut Vec<Box<dyn VfsNode>> {
-        &mut self.children
-    }
     fn create_dir(&mut self, name: &str) -> Option<&mut Box<dyn VfsNode>> {
+        if self.children.iter().any(|c| c.get_name() == name) {
+            return None;
+        }
         self.children
             .push(Box::new(Directory::new(self.path.join(name))));
         self.children.last_mut()
     }
     fn create_file(&mut self, name: &str) -> Option<&mut Box<dyn VfsNode>> {
+        if self.children.iter().any(|c| c.get_name() == name) {
+            return None;
+        }
         self.children
             .push(Box::new(File::new(Vec::new(), self.path.join(name))));
         self.children.last_mut()
     }
-    fn remove_child(&mut self, name: &str) {
+    fn remove_child(&mut self, name: &str) -> bool {
+        let before = self.children.len();
         self.children.retain(|c| c.get_name() != name);
+        self.children.len() != before
     }
-    fn read(&self) -> Option<&Vec<u8>> {
+    fn size(&self) -> u64 {
+        0
+    }
+    fn read(&self) -> Option<&[u8]> {
         None
     }
-    fn write(&mut self, _data: Vec<u8>) {}
+    fn read_at(&self, _offset: u64, _buf: &mut [u8]) -> Option<usize> {
+        None
+    }
+    fn write_at(&mut self, _offset: u64, _buf: &[u8]) -> Option<usize> {
+        None
+    }
+    fn truncate(&mut self, _len: u64) -> bool {
+        false
+    }
 }
 
 impl VfsNode for File {
@@ -196,11 +205,21 @@ impl VfsNode for File {
     fn get_name(&self) -> &'_ str {
         self.path.get_name()
     }
-    fn resolve_path(&self, _path: Path) -> Option<&dyn VfsNode> {
-        None
+    fn resolve_path(&self, path: Path) -> Option<&dyn VfsNode> {
+        let components = canonicalize_components(&path)?;
+        if components.is_empty() {
+            Some(self)
+        } else {
+            None
+        }
     }
-    fn resolve_path_mut(&mut self, _path: Path) -> Option<&mut dyn VfsNode> {
-        None
+    fn resolve_path_mut(&mut self, path: Path) -> Option<&mut dyn VfsNode> {
+        let components = canonicalize_components(&path)?;
+        if components.is_empty() {
+            Some(self)
+        } else {
+            None
+        }
     }
     fn get_child(&self, _name: &str) -> Option<&dyn VfsNode> {
         None
@@ -211,22 +230,50 @@ impl VfsNode for File {
     fn get_children(&self) -> Vec<&dyn VfsNode> {
         Vec::new()
     }
-    fn get_children_mut(&mut self) -> &mut Vec<Box<dyn VfsNode>> {
-        panic!("File nodes do not have children")
-    }
     fn create_dir(&mut self, _name: &str) -> Option<&mut Box<dyn VfsNode>> {
         None
     }
     fn create_file(&mut self, _name: &str) -> Option<&mut Box<dyn VfsNode>> {
         None
     }
-    fn remove_child(&mut self, _name: &str) {}
-    fn read(&self) -> Option<&Vec<u8>> {
+    fn remove_child(&mut self, _name: &str) -> bool {
+        false
+    }
+    fn size(&self) -> u64 {
+        self.data.len() as u64
+    }
+    fn read(&self) -> Option<&[u8]> {
         Some(&self.data)
     }
-    fn write(&mut self, data: Vec<u8>) {
-        self.metadata.size = data.len() as u64;
-        self.data = data;
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> Option<usize> {
+        let offset = offset as usize;
+        if offset > self.data.len() {
+            return None;
+        }
+        let available = self.data.len() - offset;
+        let n = available.min(buf.len());
+        buf[..n].copy_from_slice(&self.data[offset..offset + n]);
+        Some(n)
+    }
+    fn write_at(&mut self, offset: u64, buf: &[u8]) -> Option<usize> {
+        let offset = offset as usize;
+        let end = offset.checked_add(buf.len())?;
+        if self.data.len() < end {
+            self.data.resize(end, 0);
+        }
+        self.data[offset..end].copy_from_slice(buf);
+        self.metadata.size = self.data.len() as u64;
+        Some(buf.len())
+    }
+    fn truncate(&mut self, len: u64) -> bool {
+        let len = len as usize;
+        if len <= self.data.len() {
+            self.data.truncate(len);
+        } else {
+            self.data.resize(len, 0);
+        }
+        self.metadata.size = self.data.len() as u64;
+        true
     }
 }
 
@@ -239,7 +286,7 @@ impl Path {
     pub fn set(&mut self, path: String) {
         self.path = path;
     }
-    pub fn join(&mut self, path: &str) -> Self {
+    pub fn join(&self, path: &str) -> Self {
         let formatted = if self.is_root() {
             format!("/{path}")
         } else {
@@ -251,26 +298,25 @@ impl Path {
         if self.is_root() {
             return Self::new("/");
         }
-        let parent = self
-            .path
-            .split("/")
-            .take(self.path.split("/").count() - 1)
-            .collect::<Vec<_>>()
-            .join("/");
-        if parent.is_empty() {
-            Self::new("/")
-        } else {
-            Self { path: parent }
+        match self.path.rfind('/') {
+            Some(0) => Self::new("/"),
+            Some(idx) => Self {
+                path: self.path[..idx].to_string(),
+            },
+            None => Self::new("/"),
         }
     }
-    pub fn get_name(&self) -> &'_ str {
-        self.path.split("/").last().unwrap_or(&self.path)
+    pub fn get_name(&self) -> &str {
+        self.path.rsplit('/').next().unwrap_or(&self.path)
     }
-    pub fn to_string(&self) -> &String {
+    pub fn as_str(&self) -> &str {
         &self.path
     }
     pub fn is_root(&self) -> bool {
         self.path == "/"
+    }
+    pub fn is_absolute(&self) -> bool {
+        self.path.starts_with('/')
     }
 }
 
@@ -284,7 +330,7 @@ pub fn init() {
         debug!("creating /home/secrets.txt...");
         let file = home.create_file("secrets.txt").unwrap();
         debug!("writing to {}...", file.get_path());
-        file.write("secretpassword".as_bytes().to_vec());
+        file.write_all(b"secretpassword");
         debug!(
             "reading from {}...\n{:?}",
             file.get_path(),
@@ -298,7 +344,7 @@ pub fn init() {
             .get_child_mut("secrets.txt")
             .unwrap();
         debug!("editing {}...", file.get_path());
-        file.write("newsecretpassword".as_bytes().to_vec());
+        file.write_all(b"newsecretpassword");
         debug!(
             "re-reading from {}...\n{:?}",
             file.get_path(),

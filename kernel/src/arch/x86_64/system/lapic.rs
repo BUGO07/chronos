@@ -74,7 +74,7 @@ fn lapic_oneshot_timer_handler(stack_frame: *mut StackFrame) {
 }
 
 fn lapic_spurious_handler(_stack_frame: *mut StackFrame) {
-    // Spurious interrupt — do NOT send EOI
+    // no eoi
 }
 
 pub fn arm(ns: usize, vector: u8) {
@@ -88,7 +88,6 @@ pub fn arm(ns: usize, vector: u8) {
 }
 
 fn calibrate_timer() {
-    // Mask the LVT timer during calibration to prevent spurious fires
     mmio_write(reg::LVT, 1 << 16);
     mmio_write(reg::TDC, 0b1011);
 

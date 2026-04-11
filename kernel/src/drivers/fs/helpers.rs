@@ -29,8 +29,7 @@ pub fn ls(path: Path) -> Vec<&'static str> {
 
 pub fn cat(path: Path) -> Option<&'static str> {
     get_vfs()
-        .resolve_path(path)
-        .unwrap()
+        .resolve_path(path)?
         .read()
         .map(|data| str::from_utf8(data).unwrap())
 }

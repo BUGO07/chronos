@@ -444,25 +444,25 @@ extern "C" fn uacpi_kernel_free_event(handle: uacpi_handle) {
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_get_thread_id() -> uacpi_thread_id {
-    1 as *mut c_void
+    crate::scheduler::thread::current_thread().map_or(1, |x| x.lock().gtid) as _
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_acquire_mutex(handle: uacpi_handle, timeout: uacpi_u16) -> uacpi_status {
     let mutex = unsafe { &*(handle as *const Mutex<()>) };
-    let mut locked = None;
+    let mut locked = false;
 
     match timeout {
         0xFFFF => {
-            mutex.lock();
+            mutex.lock_no_guard();
             return UACPI_STATUS_OK;
         }
-        0x0000 => locked = mutex.try_lock(),
+        0x0000 => locked = mutex.try_lock_no_guard(),
         _ => {
             let time = crate::arch::drivers::time::preferred_timer_ms();
             while crate::arch::drivers::time::preferred_timer_ms() < time + timeout as u64 {
-                locked = mutex.try_lock();
-                if locked.is_some() {
+                locked = mutex.try_lock_no_guard();
+                if locked {
                     break;
                 }
                 uacpi_kernel_sleep(1);
@@ -470,7 +470,7 @@ extern "C" fn uacpi_kernel_acquire_mutex(handle: uacpi_handle, timeout: uacpi_u1
         }
     }
 
-    if locked.is_some() {
+    if locked {
         UACPI_STATUS_OK
     } else {
         UACPI_STATUS_TIMEOUT
@@ -479,8 +479,7 @@ extern "C" fn uacpi_kernel_acquire_mutex(handle: uacpi_handle, timeout: uacpi_u1
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_release_mutex(handle: uacpi_handle) {
-    let mutex = unsafe { &*(handle as *const Mutex<()>) };
-    unsafe { mutex.force_unlock() };
+    unsafe { (*(handle as *const Mutex<()>)).force_unlock() };
 }
 
 #[unsafe(no_mangle)]
@@ -523,7 +522,6 @@ extern "C" fn uacpi_kernel_handle_firmware_request(
     UACPI_STATUS_OK
 }
 
-// Interrupt handler state using atomics to avoid data races
 static UACPI_INTERRUPT_IRQ: AtomicU8 = AtomicU8::new(0xFF); // 0xFF = no handler
 static UACPI_INTERRUPT_HANDLER_PTR: AtomicPtr<()> = AtomicPtr::new(null_mut());
 static UACPI_INTERRUPT_CTX: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
@@ -538,7 +536,6 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
     unsafe {
         let vector = (irq + 0x20) as u8;
 
-        // Store handler as a raw pointer
         if let Some(f) = func {
             UACPI_INTERRUPT_HANDLER_PTR.store(f as *mut (), Ordering::SeqCst);
         }
@@ -605,7 +602,7 @@ extern "C" fn uacpi_kernel_restore_interrupts(state: uacpi_interrupt_state) {
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_create_spinlock() -> uacpi_handle {
-    let lock = Box::new(SpinLock::<()>::new(()));
+    let lock = Box::new(SpinLock::new(()));
     Box::into_raw(lock) as *mut c_void
 }
 
@@ -626,10 +623,7 @@ extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flag
         crate::utils::asm::toggle_ints(false);
     }
     let lock = unsafe { &*(handle as *const SpinLock<()>) };
-    lock.lock();
-    // Encode prior interrupt state in the returned cpu_flags so unlock can
-    // restore it correctly without a shared static (which would race when the
-    // same spinlock wrapper is used from multiple contexts).
+    lock.lock_no_guard();
     if ints_enabled { 1 } else { 0 }
 }
 
