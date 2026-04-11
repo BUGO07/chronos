@@ -11,7 +11,7 @@ use limine::{
     request::{
         BootloaderInfoRequest, BootloaderInfoResponse, DtbRequest, ExecutableAddressRequest,
         ExecutableAddressResponse, ExecutableFileRequest, FramebufferRequest, HhdmRequest,
-        MemmapRequest, MpRequest, MpResponse, RsdpRequest,
+        MemmapRequest, ModulesRequest, MpRequest, MpResponse, RsdpRequest,
     },
 };
 
@@ -59,6 +59,10 @@ pub static BOOTLOADER_INFO_REQUEST: BootloaderInfoRequest = BootloaderInfoReques
 #[unsafe(link_section = ".requests")]
 pub static DEVICE_TREE_REQUEST: DtbRequest = DtbRequest::new();
 
+#[used]
+#[unsafe(link_section = ".requests")]
+pub static MODULES_REQUEST: ModulesRequest = ModulesRequest::new();
+
 pub fn get_framebuffers() -> impl Iterator<Item = &'static &'static Framebuffer> {
     FRAMEBUFFER_REQUEST
         .response()
@@ -101,4 +105,8 @@ pub fn get_bootloader_info() -> &'static BootloaderInfoResponse {
 
 pub fn get_device_tree() -> Option<*const ()> {
     DEVICE_TREE_REQUEST.response().map(|x| x.dtb_ptr)
+}
+
+pub fn get_modules() -> &'static [&'static File] {
+    MODULES_REQUEST.response().unwrap().modules()
 }

@@ -5,6 +5,7 @@
 
 use crate::{
     arch::drivers::keyboard::keyboard_thread,
+    drivers::fs::{Path, get_vfs},
     print_centered,
     utils::shell::{cursor_thread, shell_thread},
 };
@@ -167,28 +168,36 @@ pub fn main_thread() -> ! {
     scheduler::thread::spawn(shell_proc, cursor_thread as *const (), "cursor", false);
 
     // * loading userspace ELF binary
-    let elf_data = include_bytes!("../../res/test.elf");
-    let elf_proc_pid = scheduler::spawn_process(
-        unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
-        "test_elf",
-    );
-    let elf_proc = scheduler::get_proc_by_pid(elf_proc_pid).unwrap();
-    let entry = {
-        let pagemap_ref = unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() };
-        let mut pagemap = pagemap_ref.lock();
-        match crate::utils::elf::load_elf(elf_data, &mut pagemap) {
-            Ok(elf_info) => {
-                info!("loaded ELF binary, entry=0x{:X}", elf_info.entry);
-                elf_info.entry as usize
+    let bin = get_vfs()
+        .get_root()
+        .resolve_path(Path::new("/bin/test.elf"));
+    if let Some(bin) = bin
+        && let Some(elf_data) = bin.read()
+    {
+        let elf_proc_pid = scheduler::spawn_process(
+            unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
+            "test_elf",
+        );
+        let elf_proc = scheduler::get_proc_by_pid(elf_proc_pid).unwrap();
+        let entry = {
+            let pagemap_ref = unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() };
+            let mut pagemap = pagemap_ref.lock();
+            match crate::utils::elf::load_elf(elf_data, &mut pagemap) {
+                Ok(elf_info) => {
+                    info!("loaded ELF binary, entry=0x{:X}", elf_info.entry);
+                    elf_info.entry as usize
+                }
+                Err(e) => {
+                    info!("failed to load ELF: {}", e);
+                    0
+                }
             }
-            Err(e) => {
-                info!("failed to load ELF: {}", e);
-                0
-            }
+        };
+        if entry != 0 {
+            scheduler::thread::spawn(elf_proc, entry as *const (), "elf_main", true);
         }
-    };
-    if entry != 0 {
-        scheduler::thread::spawn(elf_proc, entry as *const (), "elf_main", true);
+    } else {
+        info!("no bin directory found in root fs");
     }
 
     halt_loop()

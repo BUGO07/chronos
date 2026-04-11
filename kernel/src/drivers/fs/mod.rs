@@ -322,34 +322,44 @@ impl Path {
 
 pub fn init() {
     info!("initializing vfs...");
-    unsafe {
-        let mut vfs = Vfs::new(Box::new(Directory::new(Path::new("/"))));
-        let root = vfs.get_root_mut();
-        debug!("creating /home...");
-        let home = root.create_dir("home").unwrap();
-        debug!("creating /home/secrets.txt...");
-        let file = home.create_file("secrets.txt").unwrap();
-        debug!("writing to {}...", file.get_path());
-        file.write_all(b"secretpassword");
-        debug!(
-            "reading from {}...\n{:?}",
-            file.get_path(),
-            str::from_utf8(file.read().unwrap()).unwrap()
-        );
-        VFS.set(vfs).ok();
-        let file = get_vfs()
-            .get_root_mut()
-            .get_child_mut("home")
-            .unwrap()
-            .get_child_mut("secrets.txt")
-            .unwrap();
-        debug!("editing {}...", file.get_path());
-        file.write_all(b"newsecretpassword");
-        debug!(
-            "re-reading from {}...\n{:?}",
-            file.get_path(),
-            str::from_utf8(file.read().unwrap()).unwrap()
-        );
+    let mut vfs = Vfs::new(Box::new(Directory::new(Path::new("/"))));
+
+    for module in crate::utils::limine::get_modules() {
+        let tar = module.data();
+        for item in crate::utils::ustar::TarIter::new(tar) {
+            if let Some(data) = crate::utils::ustar::tar_lookup(tar, item.name) {
+                debug!(
+                    "creating {} - {}",
+                    if item.name.ends_with("/") {
+                        "folder"
+                    } else {
+                        "file"
+                    },
+                    &item.name[1..]
+                );
+                if item.name.ends_with("/") {
+                    if &item.name[1..] == "/" {
+                        continue;
+                    }
+                    let path = Path::new(&item.name[1..item.name.len() - 1]);
+
+                    if let Some(parent) = vfs.resolve_path_mut(path.get_parent()) {
+                        parent.create_dir(path.get_name()).unwrap();
+                    }
+                } else {
+                    let path = Path::new(&item.name[1..]);
+
+                    if let Some(parent) = vfs.resolve_path_mut(path.get_parent())
+                        && let Some(file) = parent.create_file(path.get_name())
+                    {
+                        file.write_all(data);
+                    }
+                }
+            }
+        }
     }
+
+    unsafe { VFS.set(vfs).ok() };
+
     info!("done");
 }

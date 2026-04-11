@@ -73,7 +73,7 @@ impl Process {
             pid,
             next_tid: AtomicU64::new(1),
             next_stack_addr: 0x0000_7FFF_FF00_0000,
-            cwd: fs::Path::new("/").join("home"),
+            cwd: fs::Path::new("/"),
             pagemap,
             children: Vec::new(),
         }

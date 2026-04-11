@@ -5,3 +5,4 @@ int.txt
 *.hdd
 chronos*
 **/target
+ramfs.tar

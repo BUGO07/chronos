@@ -14,6 +14,7 @@ pub mod shell;
 pub mod spinlock;
 pub mod term;
 pub mod time;
+pub mod ustar;
 
 #[inline(always)]
 pub const fn align_up(addr: u64, align: u64) -> u64 {

@@ -42,6 +42,9 @@ run-bios: $(IMAGE_NAME).iso
 		-enable-kvm \
 		$(QEMUFLAGS)
 
+ramfs.tar:
+	tar --format=ustar -cf $@ -C ramfs ./
+
 ovmf/OVMF_x86_64.fd:
 	mkdir -p ovmf
 	curl -Lo $@ https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF.fd
@@ -55,10 +58,11 @@ limine/limine:
 kernel:
 	$(MAKE) -C kernel
 
-$(IMAGE_NAME).iso: limine/limine kernel
+$(IMAGE_NAME).iso: limine/limine ramfs.tar kernel
 	rm -rf iso_root
 	mkdir -p iso_root/boot
 	cp -v kernel/$(IMAGE_NAME) iso_root/boot/chronos
+	cp -v ramfs.tar iso_root/boot
 	mkdir -p iso_root/boot/limine
 	cp -v limine.conf iso_root/boot/limine/
 	mkdir -p iso_root/EFI/BOOT
@@ -90,7 +94,7 @@ testelf:
 		-C opt-level=3 -C panic=abort -C relocation-model=static \
 		-C link-arg=-Ttext=0x400000 -C link-arg=--build-id=none \
 		-C strip=symbols \
-		-o $(TESTELF_SRC:.rs=.elf) $(TESTELF_SRC)
+		-o $(dir $(abspath $(TESTELF_SRC)))/bin/$(notdir $(TESTELF_SRC:.rs=.elf)) $(TESTELF_SRC)
 
 .PHONY: clean
 clean:

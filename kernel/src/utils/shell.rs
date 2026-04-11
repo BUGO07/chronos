@@ -484,7 +484,7 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                 {
                     new_p.get_path().clone()
                 } else {
-                    println!("cd: {}: No such file or directory", p);
+                    println!("ls: {}: No such file or directory", p);
                     return;
                 }
             };
