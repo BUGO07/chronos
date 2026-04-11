@@ -73,6 +73,25 @@ $(IMAGE_NAME).iso: limine/limine kernel
 	./limine/limine bios-install $(IMAGE_NAME).iso
 	rm -rf iso_root
 
+# Allow: make testelf path/to/file.rs
+# Collects everything after `testelf` as the source path and suppresses make's
+# attempt to build those extra words as targets.
+ifeq (testelf,$(firstword $(MAKECMDGOALS)))
+  TESTELF_SRC := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
+  $(eval $(TESTELF_SRC):;@:)
+endif
+
+.PHONY: testelf
+testelf:
+	@if [ -z "$(TESTELF_SRC)" ]; then \
+		echo "usage: make testelf <path/to/file.rs>"; exit 1; \
+	fi
+	rustc --edition 2024 --target x86_64-unknown-none \
+		-C opt-level=3 -C panic=abort -C relocation-model=static \
+		-C link-arg=-Ttext=0x400000 -C link-arg=--build-id=none \
+		-C strip=symbols \
+		-o $(TESTELF_SRC:.rs=.elf) $(TESTELF_SRC)
+
 .PHONY: clean
 clean:
 	$(MAKE) -C kernel clean

@@ -13,10 +13,10 @@ use core::{
 
 use crate::{
     memory::{KERNEL_STACK_SIZE, USER_STACK_SIZE},
-    utils::{limine::get_hhdm_offset, spinlock::SpinLock},
+    utils::spinlock::SpinLock,
 };
 use alloc::{
-    collections::{btree_set::BTreeSet, vec_deque::VecDeque},
+    collections::vec_deque::VecDeque,
     sync::Arc,
     vec::Vec,
 };
@@ -39,7 +39,7 @@ fn next_pid() -> u64 {
 pub struct Scheduler {
     pub processes: Vec<Arc<SpinLock<Process>>>,
     pub current: Option<Arc<SpinLock<Thread>>>,
-    pub queue: BTreeSet<Arc<SpinLock<Thread>>>,
+    pub queue: VecDeque<Arc<SpinLock<Thread>>>,
     pub secondary_queue: VecDeque<Arc<SpinLock<Thread>>>,
     timeslice: usize,
     next_pid: AtomicU64,
@@ -50,7 +50,7 @@ impl Default for Scheduler {
         Self {
             processes: Vec::new(),
             current: None,
-            queue: BTreeSet::new(),
+            queue: VecDeque::new(),
             secondary_queue: VecDeque::new(),
             timeslice: 6_000_000,
             next_pid: AtomicU64::new(0),
@@ -121,7 +121,7 @@ pub fn schedule(regs: *mut StackFrame) {
     let mut next = None;
     let time = preferred_timer_ns();
 
-    if let Some(ct) = current_thread() {
+    if let Some(ref ct) = current_thread() {
         let mut t = ct.lock();
         memcpy(
             &raw mut t.regs as *mut c_void,
@@ -156,13 +156,13 @@ pub fn schedule(regs: *mut StackFrame) {
                 Status::Terminated => {
                     unsafe {
                         alloc::alloc::dealloc(
-                            t.kstack as *mut u8,
-                            Layout::from_size_align(KERNEL_STACK_SIZE, 0x8).unwrap(),
+                            t.kstack_alloc as *mut u8,
+                            Layout::from_size_align(KERNEL_STACK_SIZE, 16).unwrap(),
                         );
-                        if t.ustack != 0 {
+                        if t.ustack_alloc != 0 {
                             alloc::alloc::dealloc(
-                                (t.ustack + get_hhdm_offset()) as *mut u8,
-                                Layout::from_size_align(USER_STACK_SIZE, 0x8).unwrap(),
+                                t.ustack_alloc as *mut u8,
+                                Layout::from_size_align(USER_STACK_SIZE, 16).unwrap(),
                             );
                         }
                     };
@@ -170,18 +170,24 @@ pub fn schedule(regs: *mut StackFrame) {
                 Status::Blocked => {
                     // ignored
                 }
-                _ => enqueue(thread.clone()),
+                _ => {
+                    drop(t);
+                    enqueue(thread.clone());
+                }
             }
         }
     }
 
+    let mut blocked = Vec::new();
     for thread in scheduler.secondary_queue.drain(..) {
-        match thread.lock().get_status() {
-            Status::Blocked => {
-                get_scheduler().secondary_queue.push_back(thread.clone());
-            }
-            _ => enqueue(thread.clone()),
+        let status = *thread.lock().get_status();
+        match status {
+            Status::Blocked => blocked.push(thread),
+            _ => enqueue(thread),
         }
+    }
+    for thread in blocked {
+        scheduler.secondary_queue.push_back(thread);
     }
 
     if next.is_none() {
@@ -189,7 +195,10 @@ pub fn schedule(regs: *mut StackFrame) {
     }
 
     if let Some(ct) = current_thread() {
-        enqueue(ct.clone());
+        let status = *ct.lock().get_status();
+        if status != Status::Terminated && status != Status::Blocked {
+            enqueue(ct);
+        }
     }
 
     scheduler.current = next.clone();
@@ -205,18 +214,18 @@ pub fn schedule(regs: *mut StackFrame) {
         size_of::<StackFrame>(),
     );
 
-    lapic::arm(scheduler.timeslice, 0xFF);
+    lapic::arm(scheduler.timeslice, 0xFE);
     t.schedule_time = preferred_timer_ns();
 }
 
 #[inline(always)]
 pub fn enqueue(thread: Arc<SpinLock<Thread>>) {
-    get_scheduler().queue.insert(thread);
+    get_scheduler().queue.push_back(thread);
 }
 
 #[inline(always)]
 pub fn next_thread() -> Option<Arc<SpinLock<Thread>>> {
-    get_scheduler().queue.pop_first()
+    get_scheduler().queue.pop_front()
 }
 
 pub fn kill_process(pid: u64) -> bool {
@@ -242,8 +251,9 @@ pub fn kill_process(pid: u64) -> bool {
 pub fn spawn_process(pagemap: &'static Arc<SpinLock<Pagemap>>, name: &'static str) -> u64 {
     let scheduler = get_scheduler();
     let proc = Arc::new(SpinLock::new(Process::new(pagemap, name)));
-    scheduler.processes.push(proc.clone());
-    proc.lock().get_pid()
+    let pid = proc.lock().get_pid();
+    scheduler.processes.push(proc);
+    pid
 }
 
 pub fn init() {
@@ -287,5 +297,5 @@ pub fn current_process() -> Option<Arc<SpinLock<Process>>> {
     get_scheduler()
         .current
         .as_ref()
-        .map(|x| x.lock().get_parent().upgrade().unwrap())
+        .and_then(|x| x.lock().get_parent().upgrade())
 }

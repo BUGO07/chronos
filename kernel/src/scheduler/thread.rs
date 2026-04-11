@@ -3,7 +3,13 @@
     Released under EUPL 1.2 License
 */
 
-use core::{alloc::Layout, arch::asm, cell::OnceCell, fmt::Debug};
+use core::{
+    alloc::Layout,
+    arch::asm,
+    cell::OnceCell,
+    fmt::Debug,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use crate::{
     memory::{
@@ -22,7 +28,7 @@ use crate::{
 
 use super::*;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Status {
     Ready,
     Running,
@@ -31,11 +37,16 @@ pub enum Status {
     Terminated,
 }
 
+static NEXT_GLOBAL_TID: AtomicU64 = AtomicU64::new(1);
+
 pub struct Thread {
     name: &'static str,
     tid: u64,
+    gtid: u64,
     pub kstack: u64,
     pub ustack: u64,
+    pub kstack_alloc: u64,
+    pub ustack_alloc: u64,
     pub regs: StackFrame,
     parent: Weak<SpinLock<Process>>,
     status: Status,
@@ -55,8 +66,8 @@ impl Debug for Thread {
 }
 
 impl PartialEq for Thread {
-    fn eq(&self, _other: &Self) -> bool {
-        false
+    fn eq(&self, other: &Self) -> bool {
+        self.gtid == other.gtid
     }
 }
 
@@ -70,10 +81,7 @@ impl Eq for Thread {}
 
 impl Ord for Thread {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        if self.runtime == 0 {
-            return core::cmp::Ordering::Greater;
-        }
-        self.runtime.cmp(&other.runtime)
+        (self.runtime, self.gtid).cmp(&(other.runtime, other.gtid))
     }
 }
 
@@ -83,31 +91,34 @@ unsafe impl Send for Thread {}
 impl Thread {
     pub fn new(
         proc: &'static Arc<SpinLock<Process>>,
-        func: usize,
+        func: *const (),
         name: &'static str,
         user: bool,
     ) -> Self {
-        Self::new_with_tid(proc, func, name, user, proc.lock().next_tid())
+        let tid = proc.lock().next_tid();
+        Self::new_with_tid(proc, func, name, user, tid)
     }
     pub fn new_with_tid(
         proc: &'static Arc<SpinLock<Process>>,
-        func: usize,
+        func: *const (),
         name: &'static str,
         user: bool,
         tid: u64,
     ) -> Self {
-        let kstack = unsafe {
-            alloc::alloc::alloc(Layout::from_size_align(KERNEL_STACK_SIZE, 0x8).unwrap()) as u64
+        let kstack_alloc = unsafe {
+            alloc::alloc::alloc(Layout::from_size_align(KERNEL_STACK_SIZE, 16).unwrap()) as u64
         };
+        let kstack = kstack_alloc;
 
         let mut ustack: u64 = 0;
+        let mut ustack_alloc: u64 = 0;
 
         if user {
-            let phys = unsafe {
-                alloc::alloc::alloc(Layout::from_size_align(USER_STACK_SIZE, 0x8).unwrap()) as u64
-                    - get_hhdm_offset()
+            let alloc_ptr = unsafe {
+                alloc::alloc::alloc(Layout::from_size_align(USER_STACK_SIZE, 16).unwrap()) as u64
             };
-            unsafe { proc.force_unlock() };
+            ustack_alloc = alloc_ptr;
+            let phys = alloc_ptr - get_hhdm_offset();
             let mut locked = proc.lock();
             ustack = locked.next_stack_address();
             for i in (0..USER_STACK_SIZE).step_by(page_size::SMALL as usize) {
@@ -127,8 +138,11 @@ impl Thread {
         Self {
             name,
             tid,
+            gtid: NEXT_GLOBAL_TID.fetch_add(1, Ordering::Relaxed),
             kstack,
             ustack,
+            kstack_alloc,
+            ustack_alloc,
             regs: StackFrame {
                 #[cfg(target_arch = "x86_64")]
                 cs: if user { 0x20 | 0x03 } else { 0x08 },
@@ -188,7 +202,7 @@ impl Thread {
 
 pub fn spawn(
     proc: &'static Arc<SpinLock<Process>>,
-    func: usize,
+    func: *const (),
     name: &'static str,
     user: bool,
 ) -> u64 {
@@ -215,7 +229,7 @@ pub fn sleep_ms(ms: u64) {
 pub fn yld() {
     unsafe {
         #[cfg(target_arch = "x86_64")]
-        asm!("int $0xFF");
+        asm!("int $0xFE");
         #[cfg(target_arch = "aarch64")]
         asm!("svc #0");
     }
@@ -250,7 +264,7 @@ pub fn idle0() -> &'static Arc<SpinLock<Thread>> {
         IDLE.get_or_init(|| {
             let t = Arc::new(SpinLock::new(Thread::new_with_tid(
                 get_proc_by_pid(0).unwrap(),
-                halt_loop as usize,
+                halt_loop as *const (),
                 "idle",
                 false,
                 99,
@@ -261,6 +275,6 @@ pub fn idle0() -> &'static Arc<SpinLock<Thread>> {
     }
 }
 
-pub fn current_thread() -> &'static mut Option<Arc<SpinLock<Thread>>> {
-    &mut get_scheduler().current
+pub fn current_thread() -> Option<Arc<SpinLock<Thread>>> {
+    get_scheduler().current.clone()
 }

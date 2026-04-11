@@ -17,10 +17,11 @@ where
     T: Fn(),
 {
     fn run(&self) {
-        let string = &alloc::format!(
+        let formatted = alloc::format!(
             "        {}...                        ",
             core::any::type_name::<T>().split("::").last().unwrap()
-        )[0..35];
+        );
+        let string = formatted.get(0..35).unwrap_or(&formatted);
         print!("{}", string);
         self();
         println!("[ok]");

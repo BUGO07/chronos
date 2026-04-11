@@ -85,7 +85,7 @@ pub extern "C" fn memmove(dest: *mut c_void, src: *const c_void, n: usize) -> *m
                 inout("rdi") dest => _,
                 inout("rsi") src => _,
                 inout("rcx") n => _,
-                options(nostack, preserves_flags)
+                options(nostack)
             );
             dest
         }

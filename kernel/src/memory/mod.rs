@@ -3,7 +3,8 @@
     Released under EUPL 1.2 License
 */
 
-use talc::*;
+use core::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use talc::{source::Claim, *};
 
 use crate::{
     debug, info,
@@ -13,26 +14,21 @@ use crate::{
 pub mod vmm;
 
 pub const KERNEL_STACK_SIZE: usize = 64 * 1024;
-pub static KERNEL_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
 
 pub const USER_STACK_SIZE: usize = 64 * 1024;
 pub const USER_STACK_BASE: usize = 0x800000;
 
 #[global_allocator]
-pub static ALLOCATOR: Talck<spin::Mutex<()>, ClaimOnOom> =
-    Talc::new(unsafe { ClaimOnOom::new(Span::from_array((&raw const KERNEL_STACK).cast_mut())) })
-        .lock();
+pub static ALLOCATOR: TalcLock<spin::Mutex<()>, Claim> = TalcLock::new(unsafe {
+    static mut INITIAL_HEAP: [u8; min_first_heap_size::<DefaultBinning>() + 100000] =
+        [0; min_first_heap_size::<DefaultBinning>() + 100000];
 
-pub struct TotalMemory {
-    usable_bytes: u64,
-    reserved_bytes: u64,
-}
+    Claim::array(&raw mut INITIAL_HEAP)
+});
 
-pub static mut MEMORY_INIT_STAGE: u8 = 0;
-pub static mut TOTAL_MEMORY: TotalMemory = TotalMemory {
-    usable_bytes: 0,
-    reserved_bytes: 0,
-};
+pub static MEMORY_INIT_STAGE: AtomicU8 = AtomicU8::new(0);
+static USABLE_MEMORY: AtomicU64 = AtomicU64::new(0);
+static RESERVED_MEMORY: AtomicU64 = AtomicU64::new(0);
 
 pub fn init() {
     info!("setting up...");
@@ -44,39 +40,34 @@ pub fn init() {
         let mut allocator = ALLOCATOR.lock();
 
         for entry in mem_map {
-            if entry.entry_type == limine::memory_map::EntryType::USABLE {
+            if entry.type_ == limine::memmap::MEMMAP_USABLE {
                 debug!(
                     "claiming 0x{:X}-0x{:X}...",
                     entry.base,
-                    entry.base + hhdm_offset
+                    entry.base + entry.length
                 );
-                allocator
-                    .claim(Span::from_base_size(
-                        (entry.base + hhdm_offset) as *mut u8,
-                        entry.length as usize,
-                    ))
-                    .ok();
-                TOTAL_MEMORY.usable_bytes += entry.length;
-            } else if entry.entry_type == limine::memory_map::EntryType::RESERVED {
-                TOTAL_MEMORY.reserved_bytes += entry.length
+                allocator.claim((entry.base + hhdm_offset) as *mut u8, entry.length as usize);
+                USABLE_MEMORY.fetch_add(entry.length, Ordering::Relaxed);
+            } else if entry.type_ == limine::memmap::MEMMAP_RESERVED {
+                RESERVED_MEMORY.fetch_add(entry.length, Ordering::Relaxed);
             }
         }
 
         info!("done");
-        MEMORY_INIT_STAGE = 1;
+        MEMORY_INIT_STAGE.store(1, Ordering::Release);
     }
     vmm::init();
-    unsafe { MEMORY_INIT_STAGE = 2 };
+    MEMORY_INIT_STAGE.store(2, Ordering::Release);
 }
 
 pub fn get_memory_init_stage() -> u8 {
-    unsafe { MEMORY_INIT_STAGE }
+    MEMORY_INIT_STAGE.load(Ordering::Acquire)
 }
 
 pub fn get_usable_memory() -> u64 {
-    unsafe { TOTAL_MEMORY.usable_bytes }
+    USABLE_MEMORY.load(Ordering::Relaxed)
 }
 
 pub fn get_reserved_memory() -> u64 {
-    unsafe { TOTAL_MEMORY.reserved_bytes }
+    RESERVED_MEMORY.load(Ordering::Relaxed)
 }

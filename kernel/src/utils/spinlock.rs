@@ -65,31 +65,12 @@ impl<T: Sized> SpinLock<T> {
     }
 }
 
-impl<T: Sized + PartialEq> Eq for SpinLock<T> {}
-
-impl<T: Sized + PartialEq> PartialEq for SpinLock<T> {
-    fn eq(&self, other: &Self) -> bool {
-        unsafe { *self.data.get() == *other.data.get() }
-    }
-}
-
-impl<T: Sized + core::cmp::Ord> PartialOrd for SpinLock<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<T: Sized + core::cmp::Ord> Ord for SpinLock<T> {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        unsafe { (*self.data.get()).cmp(&*other.data.get()) }
-    }
-}
-
 impl<T: Sized + Debug> Debug for SpinLock<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SpinLock")
-            .field("inner", unsafe { &*self.data.get() })
-            .finish()
+        match self.try_lock() {
+            Some(guard) => f.debug_struct("SpinLock").field("inner", &*guard).finish(),
+            None => f.debug_struct("SpinLock").field("inner", &"<locked>").finish(),
+        }
     }
 }
 

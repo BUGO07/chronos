@@ -26,13 +26,21 @@ pub fn init() {
 }
 
 pub fn serial_write(byte: u8) {
-    while (inb(COM1_LINE_STATUS) & 0x20) == 0 {}
-    outb(COM1_DATA, byte);
+    let mut timeout = 100_000u32;
+    while (inb(COM1_LINE_STATUS) & 0x20) == 0 && timeout > 0 {
+        timeout -= 1;
+    }
+    if timeout > 0 {
+        outb(COM1_DATA, byte);
+    }
 }
 
 pub fn serial_read() -> u8 {
-    while (inb(COM1_LINE_STATUS) & 1) == 0 {}
-    inb(COM1_DATA) // garbage read on real hardware
+    let mut timeout = 100_000u32;
+    while (inb(COM1_LINE_STATUS) & 1) == 0 && timeout > 0 {
+        timeout -= 1;
+    }
+    inb(COM1_DATA)
 }
 
 // pub fn serial_thread() -> ! {

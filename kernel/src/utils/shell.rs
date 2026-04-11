@@ -51,7 +51,11 @@ pub fn cursor_thread() -> ! {
         } else {
             print!("\x1b[?25l");
         }
-        visible = !visible && unsafe { !RUNNING_RTC };
+        if unsafe { !RUNNING_RTC } {
+            visible = !visible;
+        } else {
+            visible = false;
+        }
         crate::scheduler::thread::sleep_ms(500);
     }
 }
@@ -136,24 +140,22 @@ impl Shell {
                     self.input.clear();
                 }
                 // del, esc, tab, etc
-                else if !INVISIBLE_CHARS.contains(&(character as u8)) {
+                else if character.is_ascii() && !INVISIBLE_CHARS.contains(&(character as u8)) {
                     self.input.push(character as u8);
                     print!("{}", character);
                 }
             }
             DecodedKey::RawKey(key) => match key {
-                KeyCode::ArrowUp => {
-                    if !self.last_commands.is_empty() {
-                        print!("\x1b[2K\x1b[1G");
-                        if !self.input.is_empty() {
-                            self.prev_commands
-                                .push(String::from_utf8(self.input.clone()).unwrap());
-                        }
-                        self.input.clear();
-                        let last_input = self.last_commands.pop().unwrap();
-                        self.input = last_input.as_bytes().to_vec();
-                        print!("$ {last_input}");
+                KeyCode::ArrowUp if !self.last_commands.is_empty() => {
+                    print!("\x1b[2K\x1b[1G");
+                    if !self.input.is_empty() {
+                        self.prev_commands
+                            .push(String::from_utf8(self.input.clone()).unwrap());
                     }
+                    self.input.clear();
+                    let last_input = self.last_commands.pop().unwrap();
+                    self.input = last_input.as_bytes().to_vec();
+                    print!("$ {last_input}");
                 }
                 KeyCode::ArrowDown => {
                     print!("\x1b[2K\x1b[1G");
@@ -411,7 +413,7 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
         }
         "lspci" => {
             crate::device::pci::pci_enumerate();
-            for device in unsafe { &crate::device::pci::PCI_DEVICES } {
+            for device in crate::device::pci::PCI_DEVICES.lock().iter() {
                 println!(
                     "{:02x}:{:02x}:{} {} {:04X}:{:04X} [0x{:X}:0x{:X}:0x{:X}]",
                     device.address.bus,
@@ -645,8 +647,10 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                             valid
                         };
                         if is_valid(x) {
-                            let bytes = x.as_bytes();
-                            color::rgb(bytes[1..3][0], bytes[3..5][0], bytes[5..7][0], false)
+                            let r = u8::from_str_radix(&x[1..3], 16).unwrap_or(0);
+                            let g = u8::from_str_radix(&x[3..5], 16).unwrap_or(0);
+                            let b = u8::from_str_radix(&x[5..7], 16).unwrap_or(0);
+                            color::rgb(r, g, b, false)
                         } else {
                             color::RESET.to_string()
                         }
@@ -705,8 +709,10 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
                             valid
                         };
                         if is_valid(x) {
-                            let bytes = x.as_bytes();
-                            color::rgb(bytes[1..3][0], bytes[3..5][0], bytes[5..7][0], true)
+                            let r = u8::from_str_radix(&x[1..3], 16).unwrap_or(0);
+                            let g = u8::from_str_radix(&x[3..5], 16).unwrap_or(0);
+                            let b = u8::from_str_radix(&x[5..7], 16).unwrap_or(0);
+                            color::rgb(r, g, b, true)
                         } else {
                             color::RESET.to_string()
                         }
@@ -767,7 +773,8 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             {
                 if let Ok(pid) = args[0].parse::<u64>() {
                     if pid == 0 {
-                        println!("congrats dumass, you just killed pid 0, which is the kernel")
+                        println!("congrats dumass, you just killed pid 0, which is the kernel");
+                        return;
                     }
                     if crate::scheduler::kill_process(pid) {
                         println!("process {} terminated", pid);

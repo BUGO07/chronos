@@ -11,7 +11,7 @@ use crate::{
     arch::interrupts::StackFrame,
     info,
     utils::{
-        asm::port::{outb, outl},
+        asm::port::outb,
         time::Timer,
     },
 };
@@ -22,8 +22,8 @@ pub static ELAPSED_MS: AtomicU64 = AtomicU64::new(0);
 pub fn init() {
     info!("setting up at 1000hz...");
     outb(0x43, 0b00110100);
-    outl(0x40, (PIT_FREQUENCY / 1000) & 0xFF);
-    outl(0x40, (PIT_FREQUENCY / 1000) >> 8);
+    outb(0x40, ((PIT_FREQUENCY / 1000) & 0xFF) as u8);
+    outb(0x40, ((PIT_FREQUENCY / 1000) >> 8) as u8);
     super::register_timer(Timer::new(
         "PIT",
         0,

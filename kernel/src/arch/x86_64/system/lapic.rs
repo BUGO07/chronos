@@ -57,7 +57,8 @@ pub fn init() {
 
     fence(Ordering::SeqCst);
 
-    crate::arch::interrupts::install_interrupt(0xff, lapic_oneshot_timer_handler);
+    crate::arch::interrupts::install_interrupt(0xfe, lapic_oneshot_timer_handler);
+    crate::arch::interrupts::install_interrupt(0xff, lapic_spurious_handler);
 
     mmio_write(reg::TPR, 0x00);
     mmio_write(reg::SIV, (1 << 8) | 0xFF);
@@ -72,17 +73,23 @@ fn lapic_oneshot_timer_handler(stack_frame: *mut StackFrame) {
     mmio_write(reg::EOI, 0);
 }
 
+fn lapic_spurious_handler(_stack_frame: *mut StackFrame) {
+    // Spurious interrupt — do NOT send EOI
+}
+
 pub fn arm(ns: usize, vector: u8) {
     let freq = LAPIC_FREQUENCY.load(Ordering::SeqCst);
 
     let lvt_value = (vector as u32) & !(0b11 << 17);
     mmio_write(reg::LVT, lvt_value);
 
-    let ticks = ((ns as u128 * freq as u128) / 1_000_000_000) as u32;
+    let ticks = ((ns as u128 * freq as u128) / 1_000_000_000).min(u32::MAX as u128) as u32;
     mmio_write(reg::TIC, ticks);
 }
 
 fn calibrate_timer() {
+    // Mask the LVT timer during calibration to prevent spurious fires
+    mmio_write(reg::LVT, 1 << 16);
     mmio_write(reg::TDC, 0b1011);
 
     let millis = 10;
@@ -102,6 +109,9 @@ fn calibrate_timer() {
     }
 
     let avg = freq_total / times;
+    if avg == 0 {
+        panic!("lapic calibration failed: frequency is zero");
+    }
     LAPIC_FREQUENCY.store(avg, Ordering::SeqCst);
 
     debug!(

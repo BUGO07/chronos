@@ -59,7 +59,7 @@ pub fn init() {
                     .ok();
             }
 
-            MCFG_ADDRESS = virt;
+            MCFG_ADDRESS.store(virt, core::sync::atomic::Ordering::Release);
         }
 
         uacpi_install_fixed_event_handler(

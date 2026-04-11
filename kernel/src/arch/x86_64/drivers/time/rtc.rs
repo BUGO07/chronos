@@ -53,25 +53,44 @@ impl RtcTime {
 
         let hour = ((total_minutes / 60) % 24 + 24) % 24;
         let minute = ((total_minutes % 60) + 60) % 60;
-        let mut day = self.day;
-        let month = self.month;
-        let year = self.year;
+        let mut day = self.day as i32;
+        let mut month = self.month as i32;
+        let mut year = self.year as i32;
 
-        if total_minutes < 0 {
-            if hour > self.hour as i32 {
-                day -= 1;
-            }
-        } else if hour < self.hour as i32 {
+        if total_minutes < 0 && hour > self.hour as i32 {
+            day -= 1;
+        } else if total_minutes >= 24 * 60 || (total_minutes >= 0 && hour < self.hour as i32) {
             day += 1;
+        }
+
+        // Handle day underflow
+        if day < 1 {
+            month -= 1;
+            if month < 1 {
+                month = 12;
+                year -= 1;
+            }
+            day = crate::utils::time::days_in_month(year as u16, month as u8) as i32;
+        }
+
+        // Handle day overflow
+        let max_day = crate::utils::time::days_in_month(year as u16, month as u8) as i32;
+        if day > max_day {
+            day = 1;
+            month += 1;
+            if month > 12 {
+                month = 1;
+                year += 1;
+            }
         }
 
         RtcTime {
             second: self.second,
             minute: minute as u8,
             hour: hour as u8,
-            day,
-            month,
-            year,
+            day: day as u8,
+            month: month as u8,
+            year: year as u16,
             timezone_offset_minutes: self.timezone_offset_minutes,
         }
     }
@@ -106,7 +125,7 @@ pub fn read_rtc() -> RtcTime {
     let data_port = 0x71;
 
     while {
-        outb(address_port, 0x0A);
+        outb(address_port, 0x80 | 0x0A);
         inb(data_port) & 0x80 != 0
     } {
         core::hint::spin_loop();
@@ -120,7 +139,7 @@ pub fn read_rtc() -> RtcTime {
     let mut year = read_cmos_register(0x09);
     let mut century = read_cmos_register(0x32);
 
-    outb(address_port, 0x0B);
+    outb(address_port, 0x80 | 0x0B);
     let status_b = inb(data_port);
 
     if (status_b & 0x04) == 0 {
@@ -151,7 +170,7 @@ pub fn read_rtc() -> RtcTime {
 }
 
 fn read_cmos_register(reg: u8) -> u8 {
-    outb(ADDRESS_PORT, reg);
+    outb(ADDRESS_PORT, 0x80 | reg);
     inb(DATA_PORT)
 }
 

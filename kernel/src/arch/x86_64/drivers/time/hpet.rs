@@ -10,7 +10,9 @@ use crate::{
 };
 use uacpi_sys::*;
 
-static mut HPET_ADDRESS: u64 = 0;
+use core::sync::atomic::{AtomicU64, Ordering};
+
+static HPET_ADDRESS: AtomicU64 = AtomicU64::new(0);
 
 pub fn init() {
     let supported = supported();
@@ -21,7 +23,7 @@ pub fn init() {
 
     info!("setting up...");
 
-    let paddr = unsafe { HPET_ADDRESS };
+    let paddr = HPET_ADDRESS.load(Ordering::Relaxed);
     let address = paddr + get_hhdm_offset();
 
     debug!("mapping hpet: 0x{:X} -> 0x{:X}", paddr, address);
@@ -35,6 +37,11 @@ pub fn init() {
     };
 
     let capabilities = hpet_read(0x000);
+    let period_fs = capabilities >> 32;
+    if period_fs == 0 {
+        info!("hpet period is zero, skipping");
+        return;
+    }
 
     let mut config = hpet_read(0x010);
     config |= 1;
@@ -43,7 +50,7 @@ pub fn init() {
     super::register_timer(Timer::new(
         "HPET",
         hpet_read(0xF0),
-        1_000_000_000_000_000 / (capabilities >> 32),
+        1_000_000_000_000_000 / period_fs,
         true,
         20,
         |timer: &Timer| {
@@ -67,22 +74,31 @@ fn supported() -> bool {
         let hpet = *(table.__bindgen_anon_1.ptr as *const acpi_hpet);
 
         if hpet.address.address_space_id as u32 != UACPI_ADDRESS_SPACE_SYSTEM_MEMORY {
-            uacpi_table_unref(&mut table as *mut uacpi_table);
+            uacpi_table_unref(&raw mut table);
             return false;
         }
 
-        HPET_ADDRESS = hpet.address.address;
+        HPET_ADDRESS.store(hpet.address.address, Ordering::Relaxed);
 
-        uacpi_table_unref(&mut table as *mut uacpi_table);
+        uacpi_table_unref(&raw mut table);
 
         true
     }
 }
 
 fn hpet_read(offset: u64) -> u64 {
-    unsafe { *((HPET_ADDRESS + get_hhdm_offset() + offset) as *const u64) }
+    unsafe {
+        core::ptr::read_volatile(
+            (HPET_ADDRESS.load(Ordering::Relaxed) + get_hhdm_offset() + offset) as *const u64,
+        )
+    }
 }
 
 fn hpet_write(offset: u64, value: u64) {
-    unsafe { *((HPET_ADDRESS + get_hhdm_offset() + offset) as *mut u64) = value }
+    unsafe {
+        core::ptr::write_volatile(
+            (HPET_ADDRESS.load(Ordering::Relaxed) + get_hhdm_offset() + offset) as *mut u64,
+            value,
+        )
+    }
 }

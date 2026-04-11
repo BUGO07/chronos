@@ -4,12 +4,14 @@
 */
 
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(target_arch = "x86_64")]
 use crate::utils::asm::port::{inl, outl};
+use crate::utils::spinlock::SpinLock;
 
-pub static mut PCI_DEVICES: Vec<PciDevice> = Vec::new();
-pub static mut MCFG_ADDRESS: u64 = 0;
+pub static PCI_DEVICES: SpinLock<Vec<PciDevice>> = SpinLock::new(Vec::new());
+pub static MCFG_ADDRESS: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 pub struct PciDevice {
@@ -44,9 +46,8 @@ impl PciAddress {
         let device = self.device as u64;
         let function = self.function as u64;
         let offset = (offset as u64) & !0x3;
-        unsafe {
-            (MCFG_ADDRESS + ((bus << 20) | (device << 15) | (function << 12) | offset)) as *mut u32
-        }
+        (MCFG_ADDRESS.load(Ordering::Relaxed)
+            + ((bus << 20) | (device << 15) | (function << 12) | offset)) as *mut u32
     }
 }
 
@@ -61,21 +62,19 @@ pub fn pci_config_read_u16(addr: PciAddress, offset: u8) -> u16 {
 }
 
 pub fn pci_config_read_u32(addr: PciAddress, offset: u8) -> u32 {
-    unsafe {
-        if MCFG_ADDRESS != 0 {
-            crate::utils::asm::mmio::read(addr.mmio_config_address(offset) as u64, 4) as u32
-        } else {
-            #[cfg(target_arch = "x86_64")]
-            {
-                let address = addr.io_config_address(offset);
-                outl(0xCF8, address);
-                inl(0xCFC)
-            }
+    if MCFG_ADDRESS.load(Ordering::Relaxed) != 0 {
+        crate::utils::asm::mmio::read(addr.mmio_config_address(offset) as u64, 4) as u32
+    } else {
+        #[cfg(target_arch = "x86_64")]
+        {
+            let address = addr.io_config_address(offset);
+            outl(0xCF8, address);
+            inl(0xCFC)
+        }
 
-            #[cfg(target_arch = "aarch64")]
-            {
-                panic!("couldn't access pci");
-            }
+        #[cfg(target_arch = "aarch64")]
+        {
+            panic!("couldn't access pci");
         }
     }
 }
@@ -97,31 +96,25 @@ pub fn pci_config_write_u16(addr: PciAddress, offset: u8, value: u16) {
 }
 
 pub fn pci_config_write_u32(addr: PciAddress, offset: u8, value: u32) {
-    unsafe {
-        if MCFG_ADDRESS != 0 {
-            crate::utils::asm::mmio::write(
-                addr.mmio_config_address(offset) as u64,
-                value as u64,
-                4,
-            );
-        } else {
-            #[cfg(target_arch = "x86_64")]
-            {
-                let address = addr.io_config_address(offset);
-                outl(0xCF8, address);
-                outl(0xCFC, value);
-            }
+    if MCFG_ADDRESS.load(Ordering::Relaxed) != 0 {
+        crate::utils::asm::mmio::write(addr.mmio_config_address(offset) as u64, value as u64, 4);
+    } else {
+        #[cfg(target_arch = "x86_64")]
+        {
+            let address = addr.io_config_address(offset);
+            outl(0xCF8, address);
+            outl(0xCFC, value);
+        }
 
-            #[cfg(target_arch = "aarch64")]
-            {
-                panic!("couldn't access pci");
-            }
+        #[cfg(target_arch = "aarch64")]
+        {
+            panic!("couldn't access pci");
         }
     }
 }
 
 pub fn pci_enumerate() {
-    unsafe { PCI_DEVICES.clear() };
+    PCI_DEVICES.lock().clear();
     enumerate_bus(0);
 }
 
@@ -169,17 +162,15 @@ fn enumerate_device(bus: u8, device: u8) {
             _ => "PCI device",
         };
 
-        unsafe {
-            PCI_DEVICES.push(PciDevice {
-                name, // ehh
-                address: pciaddr,
-                vendor_id,
-                device_id,
-                class_code,
-                subclass,
-                prog_if,
-            });
-        }
+        PCI_DEVICES.lock().push(PciDevice {
+            name, // ehh
+            address: pciaddr,
+            vendor_id,
+            device_id,
+            class_code,
+            subclass,
+            prog_if,
+        });
 
         if class_code == 0x06 && subclass == 0x04 {
             let secondary_bus = (pci_config_read_u32(pciaddr, 0x18) >> 8) as u8;

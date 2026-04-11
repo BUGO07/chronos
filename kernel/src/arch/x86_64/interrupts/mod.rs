@@ -3,14 +3,17 @@
     Released under EUPL 1.2 License
 */
 
-use core::arch::asm;
+use core::{
+    arch::asm,
+    sync::atomic::{AtomicPtr, Ordering},
+};
 
-use crate::info;
+use crate::{arch::interrupts::syscall::SyscallId, debug};
 
 pub mod pic;
+pub mod syscall;
 
-#[repr(C)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
 pub struct StackFrame {
     pub r15: u64,
@@ -37,15 +40,13 @@ pub struct StackFrame {
     pub ss: u64,
 }
 
-#[repr(C)]
-#[repr(packed)]
+#[repr(C, packed)]
 pub struct IdtPtr {
     limit: u16,
     base: u64,
 }
 
-#[repr(C)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy)]
 struct IdtEntry {
     offset0: u16,
@@ -162,7 +163,7 @@ isr_table:
 }
 
 type HandlerFn = fn(frame: *mut StackFrame);
-static mut HANDLERS: [Option<HandlerFn>; 256] = [None; 256];
+static HANDLERS: [AtomicPtr<()>; 256] = [const { AtomicPtr::new(core::ptr::null_mut()) }; 256];
 static mut IDT: [IdtEntry; 256] = [IdtEntry::new(); 256];
 static mut IDTR: IdtPtr = IdtPtr {
     limit: (size_of::<IdtEntry>() * 256 - 1) as u16,
@@ -209,43 +210,64 @@ extern "C" fn isr_handler(regs: *mut StackFrame) {
     unsafe {
         let registers = &*regs;
         if registers.vector < 32 {
-            panic!(
-                "exception: {}, {:?}",
-                EXCEPTION_NAMES[registers.vector as usize], registers
-            );
+            match registers.vector {
+                1..=3 => {
+                    debug!(
+                        "exception: {}, {:?}",
+                        EXCEPTION_NAMES[registers.vector as usize], registers
+                    );
+                    return;
+                }
+                _ => {
+                    panic!(
+                        "exception: {}, {:?}",
+                        EXCEPTION_NAMES[registers.vector as usize], registers
+                    );
+                }
+            }
         }
 
         if registers.vector == 0x80 {
             let id = registers.rax;
-            let arg0 = registers.rdi;
-            let arg1 = registers.rsi;
-            let arg2 = registers.rdx;
-            let arg3 = registers.r10;
-            let arg4 = registers.r8;
-            let arg5 = registers.r9;
-            info!(
-                "syscall {} with args {} {} {} {} {} {}",
-                id, arg0, arg1, arg2, arg3, arg4, arg5
+            let a0 = registers.rdi;
+            let a1 = registers.rsi;
+            let a2 = registers.rdx;
+            let a3 = registers.r10;
+            let a4 = registers.r8;
+            let a5 = registers.r9;
+            syscall::syscall_handler(
+                core::mem::transmute::<u64, SyscallId>(id),
+                a0,
+                a1,
+                a2,
+                a3,
+                a4,
+                a5,
             );
         }
 
-        if let Some(handler) = HANDLERS[registers.vector as usize] {
+        let handler_ptr = HANDLERS[registers.vector as usize].load(Ordering::Acquire);
+        if !handler_ptr.is_null() {
+            let handler: HandlerFn = core::mem::transmute(handler_ptr);
             handler(regs);
         }
     };
 }
 
 unsafe extern "C" {
-    static isr_table: u64;
+    static isr_table: [u64; 256];
 }
 
 pub fn init() {
-    let table = &raw const isr_table;
     unsafe {
         for (i, entry) in IDT.iter_mut().enumerate() {
             entry.set(
-                *table.add(i),
-                if i == 0x80 { Some(0xEE) } else { Some(0x8E) },
+                isr_table[i],
+                if i == 0x80 || i == 0xFE {
+                    Some(0xEE)
+                } else {
+                    Some(0x8E)
+                },
                 None,
             );
         }
@@ -253,19 +275,21 @@ pub fn init() {
 
         asm!("cli; lidt [{}]", in(reg) &IDTR, options(readonly, nostack, preserves_flags));
 
-        HANDLERS[0x20] = Some(crate::arch::drivers::time::pit::timer_interrupt_handler);
-        HANDLERS[0x21] = Some(crate::arch::drivers::keyboard::keyboard_interrupt_handler);
+        install_interrupt(
+            0x20,
+            crate::arch::drivers::time::pit::timer_interrupt_handler,
+        );
+        install_interrupt(
+            0x21,
+            crate::arch::drivers::keyboard::keyboard_interrupt_handler,
+        );
     }
 }
 
 pub fn install_interrupt(vector: u8, func: HandlerFn) {
-    unsafe {
-        HANDLERS[vector as usize] = Some(func);
-    }
+    HANDLERS[vector as usize].store(func as *mut (), Ordering::Release);
 }
 
 pub fn clear_interrupt(vector: u8) {
-    unsafe {
-        HANDLERS[vector as usize] = None;
-    }
+    HANDLERS[vector as usize].store(core::ptr::null_mut(), Ordering::Release);
 }

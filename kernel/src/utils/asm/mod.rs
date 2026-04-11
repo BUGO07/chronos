@@ -530,11 +530,12 @@ pub fn kvm_base() -> u32 {
                 let bytes = num.to_le_bytes();
                 output[i * 4..(i + 1) * 4].copy_from_slice(&bytes);
             }
+            #[allow(clippy::manual_c_str_literals)]
             if crate::utils::asm::mem::memcmp(
-                c"KVMKVMKVM".as_ptr() as *const c_void,
+                b"KVMKVMKVM\0\0\0".as_ptr() as *const c_void,
                 output.as_ptr() as *const c_void,
                 12,
-            ) != 0
+            ) == 0
             {
                 return base;
             }

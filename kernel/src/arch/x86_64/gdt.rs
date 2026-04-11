@@ -256,7 +256,6 @@ pub fn init() {
             ptr = in(reg) &raw const *GDT_PTR,
             data = in(reg) SELECTORS.kernel_data.0,
             code = in(reg) SELECTORS.kernel_code.0,
-            options(nostack)
         );
         info!("loading tss");
         asm!(

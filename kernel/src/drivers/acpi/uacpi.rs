@@ -7,7 +7,7 @@ use core::{
     alloc::Layout,
     ffi::{CStr, c_void},
     ptr::null_mut,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicUsize, Ordering},
 };
 
 use alloc::{boxed::Box, collections::btree_map::BTreeMap};
@@ -45,7 +45,7 @@ extern "C" fn uacpi_kernel_pci_device_open(
     handle: *mut uacpi_handle,
 ) -> uacpi_status {
     let pci_addr = PciAddress {
-        bus: address.segment as u8,
+        bus: address.bus,
         device: address.device,
         function: address.function,
     };
@@ -68,6 +68,9 @@ extern "C" fn uacpi_kernel_pci_read8(
     offset: uacpi_size,
     value: *mut uacpi_u8,
 ) -> uacpi_status {
+    if offset > 0xFF {
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
     let id = handle as usize;
     if let Some(addr) = PCI_HANDLES.lock().get(&id) {
         unsafe { *value = pci_config_read_u8(*addr, offset as u8) };
@@ -83,6 +86,9 @@ extern "C" fn uacpi_kernel_pci_read16(
     offset: uacpi_size,
     value: *mut uacpi_u16,
 ) -> uacpi_status {
+    if offset > 0xFE {
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
     let id = handle as usize;
     if let Some(addr) = PCI_HANDLES.lock().get(&id) {
         unsafe { *value = pci_config_read_u16(*addr, offset as u8) };
@@ -98,6 +104,9 @@ extern "C" fn uacpi_kernel_pci_read32(
     offset: uacpi_size,
     value: *mut uacpi_u32,
 ) -> uacpi_status {
+    if offset > 0xFC {
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
     let id = handle as usize;
     if let Some(addr) = PCI_HANDLES.lock().get(&id) {
         unsafe { *value = pci_config_read_u32(*addr, offset as u8) };
@@ -113,6 +122,9 @@ extern "C" fn uacpi_kernel_pci_write8(
     offset: uacpi_size,
     value: uacpi_u8,
 ) -> uacpi_status {
+    if offset > 0xFF {
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
     let id = handle as usize;
     if let Some(addr) = PCI_HANDLES.lock().get(&id) {
         pci_config_write_u8(*addr, offset as u8, value);
@@ -128,6 +140,9 @@ extern "C" fn uacpi_kernel_pci_write16(
     offset: uacpi_size,
     value: uacpi_u16,
 ) -> uacpi_status {
+    if offset > 0xFE {
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
     let id = handle as usize;
     if let Some(addr) = PCI_HANDLES.lock().get(&id) {
         pci_config_write_u16(*addr, offset as u8, value);
@@ -143,6 +158,9 @@ extern "C" fn uacpi_kernel_pci_write32(
     offset: uacpi_size,
     value: uacpi_u32,
 ) -> uacpi_status {
+    if offset > 0xFC {
+        return UACPI_STATUS_INVALID_ARGUMENT;
+    }
     let id = handle as usize;
     if let Some(addr) = PCI_HANDLES.lock().get(&id) {
         pci_config_write_u32(*addr, offset as u8, value);
@@ -271,6 +289,7 @@ extern "C" fn uacpi_kernel_io_write32(
 extern "C" fn uacpi_kernel_map(_addr: uacpi_phys_addr, _len: uacpi_size) -> *mut c_void {
     #[cfg(target_arch = "x86_64")]
     {
+        let hhdm = crate::utils::limine::get_hhdm_offset();
         let psize = page_size::SMALL;
         let paddr = crate::utils::align_down(_addr, psize);
         let size = crate::utils::align_up((_addr - paddr) + _len as u64, psize);
@@ -281,11 +300,11 @@ extern "C" fn uacpi_kernel_map(_addr: uacpi_phys_addr, _len: uacpi_size) -> *mut
                     .get_mut()
                     .unwrap()
                     .lock()
-                    .map(paddr + i, paddr + i, flag::RW, psize)
-                    .unwrap();
+                    .map(paddr + hhdm + i, paddr + i, flag::RW, psize)
+                    .ok();
             };
         }
-        _addr as *mut c_void
+        (_addr + hhdm) as *mut c_void
     }
     #[cfg(target_arch = "aarch64")]
     null_mut()
@@ -396,13 +415,15 @@ impl SimpleEvent {
             if value == 0 {
                 return false;
             }
-            if self
-                .counter
-                .compare_exchange(value, value - 1, Ordering::AcqRel, Ordering::Acquire)
-                .unwrap()
-                != 0
-            {
-                return true;
+            match self.counter.compare_exchange(
+                value,
+                value - 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(v) if v != 0 => return true,
+                Ok(_) => return false,
+                Err(_) => continue,
             }
         }
     }
@@ -416,7 +437,9 @@ extern "C" fn uacpi_kernel_create_event() -> uacpi_handle {
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_free_event(handle: uacpi_handle) {
-    uacpi_kernel_free(handle);
+    if !handle.is_null() {
+        let _ = unsafe { Box::from_raw(handle as *mut SimpleEvent) };
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -434,16 +457,17 @@ extern "C" fn uacpi_kernel_acquire_mutex(handle: uacpi_handle, timeout: uacpi_u1
             mutex.lock();
             return UACPI_STATUS_OK;
         }
-        0x0000 => {
+        0x0000 => locked = mutex.try_lock(),
+        _ => {
             let time = crate::arch::drivers::time::preferred_timer_ms();
             while crate::arch::drivers::time::preferred_timer_ms() < time + timeout as u64 {
                 locked = mutex.try_lock();
-                if locked.is_none() {
-                    uacpi_kernel_sleep(1);
+                if locked.is_some() {
+                    break;
                 }
+                uacpi_kernel_sleep(1);
             }
         }
-        _ => locked = mutex.try_lock(),
     }
 
     if locked.is_some() {
@@ -499,8 +523,10 @@ extern "C" fn uacpi_kernel_handle_firmware_request(
     UACPI_STATUS_OK
 }
 
-static mut UACPI_INTERRUPT_HANDLER: (Option<u8>, Option<uacpi_interrupt_handler>) = (None, None);
-static mut UACPI_INTERRUPT_CTX: Option<uacpi_handle> = None;
+// Interrupt handler state using atomics to avoid data races
+static UACPI_INTERRUPT_IRQ: AtomicU8 = AtomicU8::new(0xFF); // 0xFF = no handler
+static UACPI_INTERRUPT_HANDLER_PTR: AtomicPtr<()> = AtomicPtr::new(null_mut());
+static UACPI_INTERRUPT_CTX: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_install_interrupt_handler(
@@ -512,8 +538,12 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
     unsafe {
         let vector = (irq + 0x20) as u8;
 
-        UACPI_INTERRUPT_HANDLER = (Some(irq as u8), Some(func));
-        UACPI_INTERRUPT_CTX = Some(ctx);
+        // Store handler as a raw pointer
+        if let Some(f) = func {
+            UACPI_INTERRUPT_HANDLER_PTR.store(f as *mut (), Ordering::SeqCst);
+        }
+        UACPI_INTERRUPT_CTX.store(ctx, Ordering::SeqCst);
+        UACPI_INTERRUPT_IRQ.store(irq as u8, Ordering::SeqCst);
 
         #[cfg(target_arch = "x86_64")]
         crate::arch::interrupts::install_interrupt(vector, handle_uacpi_interrupt);
@@ -527,9 +557,15 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
 
 #[cfg(target_arch = "x86_64")]
 fn handle_uacpi_interrupt(_stack_frame: *mut crate::arch::interrupts::StackFrame) {
-    unsafe {
-        if let (Some(irq), Some(handler)) = UACPI_INTERRUPT_HANDLER {
-            handler.unwrap()(UACPI_INTERRUPT_CTX.unwrap());
+    let irq = UACPI_INTERRUPT_IRQ.load(Ordering::SeqCst);
+    let handler_ptr = UACPI_INTERRUPT_HANDLER_PTR.load(Ordering::SeqCst);
+    let ctx = UACPI_INTERRUPT_CTX.load(Ordering::SeqCst);
+
+    if irq != 0xFF && !handler_ptr.is_null() {
+        unsafe {
+            let handler: unsafe extern "C" fn(uacpi_handle) -> uacpi_interrupt_ret =
+                core::mem::transmute(handler_ptr);
+            handler(ctx);
             #[cfg(target_arch = "x86_64")]
             crate::arch::interrupts::pic::send_eoi(irq);
         }
@@ -541,18 +577,32 @@ extern "C" fn uacpi_kernel_uninstall_interrupt_handler(
     _func: uacpi_interrupt_handler,
     irq_handle: uacpi_handle,
 ) -> uacpi_status {
-    unsafe {
-        let _vector = irq_handle as u8;
+    let _vector = irq_handle as u8;
 
-        #[cfg(target_arch = "x86_64")]
-        crate::arch::interrupts::clear_interrupt(_vector);
-        #[cfg(target_arch = "x86_64")]
-        crate::arch::interrupts::pic::mask(_vector);
+    #[cfg(target_arch = "x86_64")]
+    crate::arch::interrupts::clear_interrupt(_vector);
+    #[cfg(target_arch = "x86_64")]
+    crate::arch::interrupts::pic::mask(_vector);
 
-        UACPI_INTERRUPT_HANDLER = (None, None);
-        UACPI_INTERRUPT_CTX = None;
+    UACPI_INTERRUPT_HANDLER_PTR.store(null_mut(), Ordering::SeqCst);
+    UACPI_INTERRUPT_CTX.store(null_mut(), Ordering::SeqCst);
+    UACPI_INTERRUPT_IRQ.store(0xFF, Ordering::SeqCst);
 
-        UACPI_STATUS_OK
+    UACPI_STATUS_OK
+}
+
+static UACPI_INTS_SHOULD_RESTORE: AtomicBool = AtomicBool::new(false);
+
+#[unsafe(no_mangle)]
+extern "C" fn uacpi_kernel_disable_interrupts() {
+    UACPI_INTS_SHOULD_RESTORE.store(crate::utils::asm::int_status(), Ordering::SeqCst);
+    crate::utils::asm::toggle_ints(false);
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn uacpi_kernel_restore_interrupts() {
+    if UACPI_INTS_SHOULD_RESTORE.swap(false, Ordering::SeqCst) {
+        crate::utils::asm::toggle_ints(true);
     }
 }
 
@@ -569,30 +619,32 @@ extern "C" fn uacpi_kernel_free_spinlock(handle: uacpi_handle) {
     }
 }
 
-static mut INTS_ENABLED: bool = true;
-
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flags {
-    if !handle.is_null() {
-        let ints_enabled = crate::utils::asm::int_status();
-        if ints_enabled {
-            crate::utils::asm::toggle_ints(false);
-        }
-        let lock = unsafe { &*(handle as *const SpinLock<()>) };
-        lock.lock();
-        unsafe { INTS_ENABLED = ints_enabled };
+    if handle.is_null() {
+        return 0;
     }
-    0
+    let ints_enabled = crate::utils::asm::int_status();
+    if ints_enabled {
+        crate::utils::asm::toggle_ints(false);
+    }
+    let lock = unsafe { &*(handle as *const SpinLock<()>) };
+    lock.lock();
+    // Encode prior interrupt state in the returned cpu_flags so unlock can
+    // restore it correctly without a shared static (which would race when the
+    // same spinlock wrapper is used from multiple contexts).
+    if ints_enabled { 1 } else { 0 }
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn uacpi_kernel_unlock_spinlock(handle: uacpi_handle) {
-    if !handle.is_null() {
-        let lock = unsafe { &*(handle as *const SpinLock<()>) };
-        unsafe { lock.force_unlock() };
-        if unsafe { INTS_ENABLED } {
-            crate::utils::asm::toggle_ints(true);
-        }
+extern "C" fn uacpi_kernel_unlock_spinlock(handle: uacpi_handle, flags: uacpi_cpu_flags) {
+    if handle.is_null() {
+        return;
+    }
+    let lock = unsafe { &*(handle as *const SpinLock<()>) };
+    unsafe { lock.force_unlock() };
+    if flags != 0 {
+        crate::utils::asm::toggle_ints(true);
     }
 }
 
@@ -602,7 +654,7 @@ extern "C" fn uacpi_kernel_schedule_work(
     _handler: uacpi_work_handler,
     _ctx: uacpi_handle,
 ) -> uacpi_status {
-    UACPI_STATUS_OK
+    UACPI_STATUS_UNIMPLEMENTED
 }
 
 #[unsafe(no_mangle)]

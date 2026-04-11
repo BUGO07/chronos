@@ -42,15 +42,23 @@ pub fn init() {
             true,
             0,
             |timer: &Timer| {
-                let table = &*TABLE;
-                let mut time: u128 = _rdtsc() as u128 - table.tsc_timestamp as u128;
-                if table.tsc_shift >= 0 {
-                    time <<= table.tsc_shift;
+                let table_ptr = Arc::as_ptr(&*TABLE);
+                // Use raw pointer + read_unaligned for packed struct fields
+                let version = unsafe { core::ptr::addr_of!((*table_ptr).version).read_unaligned() };
+                let tsc_timestamp = unsafe { core::ptr::addr_of!((*table_ptr).tsc_timestamp).read_unaligned() };
+                let system_time = unsafe { core::ptr::addr_of!((*table_ptr).system_time).read_unaligned() };
+                let tsc_to_system_mul = unsafe { core::ptr::addr_of!((*table_ptr).tsc_to_system_mul).read_unaligned() };
+                let tsc_shift = unsafe { core::ptr::addr_of!((*table_ptr).tsc_shift).read_unaligned() };
+                let _ = version; // read for seqlock consistency
+
+                let mut time: u128 = _rdtsc() as u128 - tsc_timestamp as u128;
+                if tsc_shift >= 0 {
+                    time <<= tsc_shift;
                 } else {
-                    time >>= -table.tsc_shift;
+                    time >>= -tsc_shift;
                 }
-                time = (time * table.tsc_to_system_mul as u128) >> 32;
-                time += table.system_time as u128;
+                time = (time * tsc_to_system_mul as u128) >> 32;
+                time += system_time as u128;
 
                 time as u64 - timer.offset
             },
@@ -62,7 +70,7 @@ pub fn init() {
             (Arc::as_ptr(&*TABLE) as u64 - get_hhdm_offset()) | 1,
         );
         timer
-            .set_offset((timer.elapsed_ns)(&timer) - (super::pit::current_pit_ticks() / 1_000_000));
+            .set_offset((timer.elapsed_ns)(&timer) - (super::pit::current_pit_ticks() * 1_000_000));
         info!("done");
         super::register_timer(timer);
     }
@@ -79,12 +87,14 @@ pub fn supported() -> bool {
 }
 
 pub fn tsc_freq() -> u64 {
-    let table = &*TABLE;
-    let mut freq = (1_000_000_000u64 << 32) / table.tsc_to_system_mul as u64;
-    if table.tsc_shift < 0 {
-        freq <<= -table.tsc_shift;
+    let table_ptr = Arc::as_ptr(&*TABLE);
+    let tsc_to_system_mul = unsafe { core::ptr::addr_of!((*table_ptr).tsc_to_system_mul).read_unaligned() };
+    let tsc_shift = unsafe { core::ptr::addr_of!((*table_ptr).tsc_shift).read_unaligned() };
+    let mut freq = (1_000_000_000u64 << 32) / tsc_to_system_mul as u64;
+    if tsc_shift < 0 {
+        freq <<= -tsc_shift;
     } else {
-        freq >>= table.tsc_shift;
+        freq >>= tsc_shift;
     }
     freq
 }

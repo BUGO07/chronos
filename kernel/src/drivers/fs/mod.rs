@@ -212,8 +212,7 @@ impl VfsNode for File {
         Vec::new()
     }
     fn get_children_mut(&mut self) -> &mut Vec<Box<dyn VfsNode>> {
-        static mut EMPTY_DATA: Vec<Box<dyn VfsNode>> = Vec::new(); // holy bad code
-        unsafe { &mut EMPTY_DATA }
+        panic!("File nodes do not have children")
     }
     fn create_dir(&mut self, _name: &str) -> Option<&mut Box<dyn VfsNode>> {
         None
@@ -249,13 +248,19 @@ impl Path {
         Self { path: formatted }
     }
     pub fn get_parent(&self) -> Self {
-        Self {
-            path: self
-                .path
-                .split("/")
-                .take(self.path.split("/").count() - 1)
-                .collect::<Vec<_>>()
-                .join("/"),
+        if self.is_root() {
+            return Self::new("/");
+        }
+        let parent = self
+            .path
+            .split("/")
+            .take(self.path.split("/").count() - 1)
+            .collect::<Vec<_>>()
+            .join("/");
+        if parent.is_empty() {
+            Self::new("/")
+        } else {
+            Self { path: parent }
         }
     }
     pub fn get_name(&self) -> &'_ str {

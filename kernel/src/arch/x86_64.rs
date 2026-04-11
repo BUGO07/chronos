@@ -63,21 +63,23 @@ pub fn _start() -> ! {
     self::system::cpu::init();
     self::drivers::mouse::init();
     crate::device::pci::pci_enumerate();
-    let pci_devices = unsafe { &crate::device::pci::PCI_DEVICES };
-    info!("Found {} PCI devices:", pci_devices.len());
-    for device in pci_devices {
-        info!(
-            "{:02x}:{:02x}:{} {} {:04X}:{:04X} [0x{:X}:0x{:X}:0x{:X}]",
-            device.address.bus,
-            device.address.device,
-            device.address.function,
-            device.name,
-            device.vendor_id,
-            device.device_id,
-            device.class_code,
-            device.subclass,
-            device.prog_if,
-        );
+    {
+        let pci_devices = crate::device::pci::PCI_DEVICES.lock();
+        info!("Found {} PCI devices:", pci_devices.len());
+        for device in pci_devices.iter() {
+            info!(
+                "{:02x}:{:02x}:{} {} {:04X}:{:04X} [0x{:X}:0x{:X}:0x{:X}]",
+                device.address.bus,
+                device.address.device,
+                device.address.function,
+                device.name,
+                device.vendor_id,
+                device.device_id,
+                device.class_code,
+                device.subclass,
+                device.prog_if,
+            );
+        }
     }
     crate::device::nvme::init();
 
@@ -87,7 +89,7 @@ pub fn _start() -> ! {
     scheduler::init();
     scheduler::thread::spawn(
         scheduler::get_proc_by_pid(0).unwrap(),
-        main_thread as usize,
+        main_thread as *const (),
         "main",
         false,
     );
@@ -111,7 +113,7 @@ pub fn main_thread() -> ! {
     let framebuffers = get_framebuffers().collect::<Vec<_>>();
     info!("found {} display(s):", framebuffers.len());
     for (i, fb) in framebuffers.iter().enumerate() {
-        info!("display {}: size - {}x{}", i + 1, fb.width(), fb.height());
+        info!("display {}: size - {}x{}", i + 1, fb.width, fb.height);
     }
 
     let rtc_time = self::drivers::time::rtc::RtcTime::current()
@@ -153,42 +155,41 @@ pub fn main_thread() -> ! {
 
     let pid0 = scheduler::get_proc_by_pid(0).unwrap();
 
-    scheduler::thread::spawn(pid0, keyboard_thread as usize, "keyboard", false);
-    // scheduler::thread::spawn(pid0, serial_thread as usize, "serial", false);
+    scheduler::thread::spawn(pid0, keyboard_thread as *const (), "keyboard", false);
+    // scheduler::thread::spawn(pid0, serial_thread as *const (), "serial", false);
 
     let shell_pid = scheduler::spawn_process(
         unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
         "shell",
     );
     let shell_proc = scheduler::get_proc_by_pid(shell_pid).unwrap();
-    scheduler::thread::spawn(shell_proc, shell_thread as usize, "main", false);
-    scheduler::thread::spawn(shell_proc, cursor_thread as usize, "cursor", false);
+    scheduler::thread::spawn(shell_proc, shell_thread as *const (), "main", false);
+    scheduler::thread::spawn(shell_proc, cursor_thread as *const (), "cursor", false);
 
-    // * loading userspace binary
-    // let addr =
-    //     unsafe { alloc::alloc::alloc_zeroed(Layout::from_size_align(0x1000, 0x1000).unwrap()) }
-    //         as u64;
-    // let phys = addr - get_hhdm_offset();
-    // let virt = 0x40000000;
-
-    // let func = include_bytes!("../../res/binary");
-
-    // unsafe {
-    //     PAGEMAP.get().unwrap().lock().map(
-    //         virt as u64,
-    //         phys,
-    //         flag::RW | flag::USER,
-    //         page_size::SMALL,
-    //     )
-    // };
-
-    // memcpy(
-    //     addr as *mut c_void,
-    //     func.as_ptr() as *const c_void,
-    //     func.len(),
-    // );
-
-    // scheduler::thread::spawn(shell_proc, virt, "userbin", true);
+    // * loading userspace ELF binary
+    let elf_data = include_bytes!("../../res/test.elf");
+    let elf_proc_pid = scheduler::spawn_process(
+        unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
+        "test_elf",
+    );
+    let elf_proc = scheduler::get_proc_by_pid(elf_proc_pid).unwrap();
+    let entry = {
+        let pagemap_ref = unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() };
+        let mut pagemap = pagemap_ref.lock();
+        match crate::utils::elf::load_elf(elf_data, &mut pagemap) {
+            Ok(elf_info) => {
+                info!("loaded ELF binary, entry=0x{:X}", elf_info.entry);
+                elf_info.entry as usize
+            }
+            Err(e) => {
+                info!("failed to load ELF: {}", e);
+                0
+            }
+        }
+    };
+    if entry != 0 {
+        scheduler::thread::spawn(elf_proc, entry as *const (), "elf_main", true);
+    }
 
     halt_loop()
 }

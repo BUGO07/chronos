@@ -33,14 +33,15 @@ pub fn many_boxes() {
 // stole it from someone in discord
 // fails if tested with the release profile
 pub fn malloc_test() {
-    for i in 0..5000 {
+    for _ in 0..5000 {
         unsafe {
             let osize = 500000;
-            let mut x =
-                alloc::alloc::alloc(alloc::alloc::Layout::from_size_align(osize, 0x8).unwrap());
-            for i in 0..osize {
+            let layout = alloc::alloc::Layout::from_size_align(osize, 0x8).unwrap();
+            let x = alloc::alloc::alloc(layout);
+            for i in 0..osize / core::mem::size_of::<usize>() {
                 *x.cast::<usize>().add(i) = 2;
             }
+            alloc::alloc::dealloc(x, layout);
         }
     }
 }

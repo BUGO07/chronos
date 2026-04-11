@@ -3,19 +3,17 @@
     Released under EUPL 1.2 License
 */
 
-use core::{cell::UnsafeCell, hint::spin_loop};
+use core::{
+    cell::UnsafeCell,
+    hint::spin_loop,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 #[cfg(target_arch = "x86_64")]
 use crate::scheduler::{self, thread};
 
-use super::spinlock::SpinLock;
-
 pub struct Mutex<T> {
-    inner: SpinLock<MutexInner<T>>,
-}
-
-struct MutexInner<T> {
-    locked: bool,
+    locked: AtomicBool,
     data: UnsafeCell<T>,
 }
 
@@ -25,32 +23,33 @@ unsafe impl<T: Send> Sync for Mutex<T> {}
 impl<T> Mutex<T> {
     pub const fn new(data: T) -> Self {
         Self {
-            inner: SpinLock::new(MutexInner {
-                locked: false,
-                data: UnsafeCell::new(data),
-            }),
+            locked: AtomicBool::new(false),
+            data: UnsafeCell::new(data),
         }
     }
 
     pub fn lock(&self) -> MutexGuard<'_, T> {
         #[cfg(target_arch = "x86_64")]
-        let mut backoff = 0;
+        let mut backoff = 0u32;
         loop {
-            let mut guard = self.inner.lock();
-            if !guard.locked {
-                guard.locked = true;
-                return MutexGuard { mutex: self };
+            if self
+                .locked
+                .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                return MutexGuard {
+                    mutex: self,
+                    data: self.data.get(),
+                };
             }
-            drop(guard);
 
             #[cfg(target_arch = "x86_64")]
             if scheduler::is_initialized() {
                 if backoff < 10 {
                     thread::yld();
                 } else {
-                    thread::sleep((1 << (backoff - 10)).min(1_000_000));
+                    thread::sleep((1u64 << (backoff - 10)).min(1_000_000));
                 }
-
                 backoff += 1;
             } else {
                 spin_loop();
@@ -61,51 +60,58 @@ impl<T> Mutex<T> {
     }
 
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        let mut guard = self.inner.lock();
-        if !guard.locked {
-            guard.locked = true;
-            Some(MutexGuard { mutex: self })
+        if self
+            .locked
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            Some(MutexGuard {
+                mutex: self,
+                data: self.data.get(),
+            })
         } else {
             None
         }
     }
 
+    /// # Safety
+    /// Caller must ensure no `MutexGuard` for this mutex is currently alive.
     pub unsafe fn force_unlock(&self) {
-        let mut guard = self.inner.lock();
-        guard.locked = false;
+        self.locked.store(false, Ordering::Release);
     }
 
     pub fn is_locked(&self) -> bool {
-        let guard = self.inner.lock();
-        guard.locked
+        self.locked.load(Ordering::Relaxed)
     }
 
     pub fn into_inner(self) -> T {
-        let inner = self.inner.into_inner();
-
-        inner.data.into_inner()
+        self.data.into_inner()
     }
 }
 
 pub struct MutexGuard<'a, T> {
     mutex: &'a Mutex<T>,
+    data: *mut T,
 }
+
+unsafe impl<T: Send> Send for MutexGuard<'_, T> {}
+unsafe impl<T: Send + Sync> Sync for MutexGuard<'_, T> {}
 
 impl<'a, T> core::ops::Deref for MutexGuard<'a, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
-        unsafe { &*self.mutex.inner.lock().data.get() }
+        unsafe { &*self.data }
     }
 }
 
 impl<'a, T> core::ops::DerefMut for MutexGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.mutex.inner.lock().data.get() }
+        unsafe { &mut *self.data }
     }
 }
 
 impl<'a, T> Drop for MutexGuard<'a, T> {
     fn drop(&mut self) {
-        unsafe { self.mutex.force_unlock() };
+        self.mutex.locked.store(false, Ordering::Release);
     }
 }

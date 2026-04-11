@@ -5,6 +5,7 @@
 
 pub mod asm;
 pub mod config;
+pub mod elf;
 pub mod heapless;
 pub mod limine;
 pub mod logger;

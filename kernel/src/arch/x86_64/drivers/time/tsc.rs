@@ -29,6 +29,9 @@ pub fn measure_cpu_frequency() -> u64 {
         let elapsed_ticks = end_ticks - start_ticks;
         let elapsed_cycles = end_cycles - start_cycles;
 
+        if elapsed_ticks == 0 {
+            continue;
+        }
         let cycles_per_tick = elapsed_cycles / elapsed_ticks;
 
         cpu_freq_hz += cycles_per_tick * 1000;

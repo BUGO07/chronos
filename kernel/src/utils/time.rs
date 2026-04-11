@@ -54,6 +54,7 @@ impl Timer {
 }
 
 pub fn elapsed_time_pretty(ns: u64, digits: u32) -> alloc::string::String {
+    let digits = digits.min(9);
     let subsecond_ns = ns % 1_000_000_000;
 
     let divisor = 10u64.pow(9 - digits);
