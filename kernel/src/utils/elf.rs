@@ -63,7 +63,7 @@ pub fn load_elf(data: &[u8], pagemap: &mut Pagemap) -> Result<ElfInfo, &'static 
         return Err("ELF too small");
     }
 
-    let ehdr = unsafe { &*(data.as_ptr() as *const Elf64Ehdr) };
+    let ehdr = unsafe { core::ptr::read_unaligned(data.as_ptr() as *const Elf64Ehdr) };
 
     if ehdr.e_ident[0..4] != ELF_MAGIC {
         return Err("invalid ELF magic");
@@ -96,7 +96,9 @@ pub fn load_elf(data: &[u8], pagemap: &mut Pagemap) -> Result<ElfInfo, &'static 
     let hhdm = get_hhdm_offset();
 
     for i in 0..ph_count {
-        let phdr = unsafe { &*(data.as_ptr().add(ph_offset + i * ph_size) as *const Elf64Phdr) };
+        let phdr = unsafe {
+            core::ptr::read_unaligned(data.as_ptr().add(ph_offset + i * ph_size) as *const Elf64Phdr)
+        };
 
         if phdr.p_type != PT_LOAD {
             continue;
