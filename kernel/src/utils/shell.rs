@@ -3,8 +3,6 @@
     Released under EUPL 1.2 License
 */
 
-use core::cell::OnceCell;
-
 use alloc::{
     string::{String, ToString},
     vec::Vec,
@@ -18,9 +16,7 @@ use alloc::collections::vec_deque::VecDeque;
 use pc_keyboard::{DecodedKey, KeyCode};
 
 #[cfg(target_arch = "x86_64")]
-use crate::{arch::drivers::keyboard::KeyboardState, drivers::fs};
-
-pub static mut SHELL: OnceCell<Shell> = OnceCell::new();
+use crate::drivers::fs;
 
 lazy_static::lazy_static! {
     pub static ref INVISIBLE_CHARS: Vec<u8> = (0u8..=255)
@@ -30,44 +26,6 @@ lazy_static::lazy_static! {
         .collect();
 }
 
-#[cfg(target_arch = "x86_64")]
-pub fn shell_thread() -> ! {
-    unsafe { SHELL.set(Shell::new()).ok() };
-    print!("$ ");
-    loop {
-        let shell = unsafe { SHELL.get_mut().unwrap() };
-        if let Some((dc, keyboard_state)) = shell.event_queue.pop_front() {
-            shell.key_event(dc, keyboard_state);
-        } else {
-            crate::scheduler::thread::yld();
-        }
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-pub fn cursor_thread() -> ! {
-    let mut visible = true;
-    loop {
-        if visible {
-            print!("\x1b[?25h");
-        } else {
-            print!("\x1b[?25l");
-        }
-        if unsafe { !RUNNING_RTC } {
-            visible = !visible;
-        } else {
-            visible = false;
-        }
-        crate::scheduler::thread::sleep_ms(500);
-    }
-}
-
-#[cfg(target_arch = "aarch64")]
-pub async fn shell_task() {
-    unsafe { SHELL.set(Shell::new()).ok() };
-    print!("$ ");
-}
-
 pub struct Shell {
     input: Vec<u8>,
     last_commands: Vec<String>,
@@ -75,7 +33,7 @@ pub struct Shell {
     color_fg: String,
     color_bg: String,
     #[cfg(target_arch = "x86_64")]
-    pub event_queue: VecDeque<(DecodedKey, &'static KeyboardState)>,
+    pub event_queue: VecDeque<(DecodedKey, Vec<KeyCode>)>,
 }
 
 impl Default for Shell {
@@ -98,15 +56,14 @@ impl Shell {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn key_event(&mut self, dc: DecodedKey, keyboard_state: &KeyboardState) {
+    pub fn key_event(&mut self, dc: DecodedKey, keys_down: &[KeyCode]) {
         print!("\x1b[?25h"); // cursor high (this is how other shells do it when they have a blinking cursor idk)
-        let slice = keyboard_state.keys_down.as_slice();
-        if slice.contains(&KeyCode::LControl) && slice.contains(&KeyCode::C) {
+        if keys_down.contains(&KeyCode::LControl) && keys_down.contains(&KeyCode::C) {
             print!("^C\n$ ");
             self.input.clear();
             return;
         }
-        if slice.contains(&KeyCode::F1) {
+        if keys_down.contains(&KeyCode::F1) {
             print!("\ncursor pos: {}\n$ ", crate::utils::term::get_cursor_pos());
             self.input.clear();
         }
@@ -132,7 +89,7 @@ impl Shell {
                     let mut split_input = raw_input.split(" ");
                     let cmd = split_input.next().unwrap();
                     let args = Vec::from_iter(split_input);
-                    run_command(cmd, args, self);
+                    self.run_command(cmd, args);
                     self.prev_commands.reverse();
                     self.last_commands.append(&mut self.prev_commands);
                     if !raw_input.is_empty() {
@@ -203,7 +160,7 @@ impl Shell {
             let mut split_input = raw_input.split(" ");
             let cmd = split_input.next().unwrap();
             let args = Vec::from_iter(split_input);
-            run_command(cmd, args, self);
+            self.run_command(cmd, args);
             self.prev_commands.reverse();
             self.last_commands.append(&mut self.prev_commands);
             if !raw_input.is_empty() {
@@ -250,22 +207,16 @@ impl Shell {
         //     _ => {}
         // },
     }
-}
 
-#[cfg(target_arch = "x86_64")]
-static mut RUNNING_RTC: bool = false;
-
-pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
-    match cmd {
-        "help" | "?" => {
-            println!(
-                "\nlist of commands:\n    \
+    pub fn run_command(&mut self, cmd: &str, args: Vec<&str>) {
+        match cmd {
+            "help" | "?" => {
+                println!(
+                    "\nlist of commands:\n    \
             !! - replaced with the last command (like linux)\n    \
             help (?) - provides help\n    \
             time [digits] - current time given from all the timers\n    \
             date [timezone] - current date given from the RTC\n    \
-            rtc [timezone] - does the same as `date` but infinite loop (unless stopped by ESC)\n    \
-            epoch [timezone] - does the same as `rtc` but gives epoch timestamp instead\n    \
             clear - clears the screen\n    \
             color [x] changes the color of the terminal (like windows or use hex)\n    \
             bg [x] changes the background of the terminal (like windows or use hex)\n    \
@@ -281,536 +232,456 @@ pub fn run_command(cmd: &str, args: Vec<&str>, shell: &mut Shell) {
             hibernate - hibernates the system\n    \
             pagefault - pagefaults on purpose\n    \
             panic [message] - panics on command with the command arguments as the panic info\n"
-            )
-        }
-        "time" => {
-            let digits = if !args.is_empty() {
-                args[0].parse().unwrap_or(5).clamp(0, 9)
-            } else {
-                5
-            };
-            for timer in time::get_timers().iter() {
-                if timer.is_supported() {
-                    println!(
-                        "{}{}- {}",
-                        timer.name,
-                        if timer.name.len() == 4 { "" } else { " " },
-                        timer.elapsed_pretty(digits)
-                    );
-                }
+                )
             }
-        }
-        #[cfg(target_arch = "x86_64")]
-        "date" => {
-            let default_zone = crate::utils::config::get_config().timezone_offset.to_int();
-            let zone = if args.is_empty() {
-                default_zone
-            } else {
-                args[0].parse().unwrap_or(default_zone)
-            };
-
-            let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
-                .with_timezone_offset(zone.clamp(-720, 840) as i16)
-                .adjusted_for_timezone();
-            println!(
-                "{} | {}",
-                rtc_time.datetime_pretty(),
-                rtc_time.timezone_pretty()
-            )
-        }
-        "rtc" => {
-            #[cfg(target_arch = "x86_64")]
-            {
-                unsafe { RUNNING_RTC = true };
-                loop {
-                    if let Some((dc, keyboard_state)) =
-                        unsafe { SHELL.get_mut().unwrap().event_queue.pop_front() }
-                    {
-                        if dc == DecodedKey::Unicode(0x1B as char) {
-                            println!();
-                            unsafe { RUNNING_RTC = false };
-                            break;
-                        }
-                        match keyboard_state.keys_down.as_slice() {
-                            [KeyCode::LControl, KeyCode::C] | [KeyCode::Escape] => {
-                                println!();
-                                unsafe { RUNNING_RTC = false };
-                                break;
-                            }
-                            _ => {}
-                        }
+            "time" => {
+                let digits = if !args.is_empty() {
+                    args[0].parse().unwrap_or(5).clamp(0, 9)
+                } else {
+                    5
+                };
+                for timer in time::get_timers().iter() {
+                    if timer.is_supported() {
+                        println!(
+                            "{}{}- {}",
+                            timer.name,
+                            if timer.name.len() == 4 { "" } else { " " },
+                            timer.elapsed_pretty(digits)
+                        );
                     }
-                    let default_zone = crate::utils::config::get_config().timezone_offset.to_int();
-                    let zone = if args.is_empty() {
-                        default_zone
-                    } else {
-                        args[0].parse().unwrap_or(default_zone)
-                    };
-
-                    let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
-                        .with_timezone_offset(zone.clamp(-720, 840) as i16)
-                        .adjusted_for_timezone();
-                    print!(
-                        "\x1b[2K\r{} | {}",
-                        rtc_time.datetime_pretty(),
-                        rtc_time.timezone_pretty()
-                    );
-                    crate::scheduler::thread::sleep_ms(100);
-                    crate::utils::asm::halt();
                 }
             }
-            #[cfg(target_arch = "aarch64")]
-            {
-                todo!()
-            }
-        }
-        "epoch" => {
             #[cfg(target_arch = "x86_64")]
-            {
-                unsafe { RUNNING_RTC = true };
-                loop {
-                    if let Some((dc, keyboard_state)) =
-                        unsafe { SHELL.get_mut().unwrap().event_queue.pop_front() }
-                    {
-                        if dc == DecodedKey::Unicode(0x1B as char) {
-                            println!();
-                            unsafe { RUNNING_RTC = false };
-                            break;
-                        }
-                        match keyboard_state.keys_down.as_slice() {
-                            [KeyCode::LControl, KeyCode::C] | [KeyCode::Escape] => {
-                                println!();
-                                unsafe { RUNNING_RTC = false };
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                    let default_zone = crate::utils::config::get_config().timezone_offset.to_int();
-                    let zone = if args.is_empty() {
-                        default_zone
-                    } else {
-                        args[0].parse().unwrap_or(default_zone)
-                    };
+            "date" => {
+                let default_zone = crate::utils::config::get_config().timezone_offset.to_int();
+                let zone = if args.is_empty() {
+                    default_zone
+                } else {
+                    args[0].parse().unwrap_or(default_zone)
+                };
 
-                    let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
-                        .with_timezone_offset(zone.clamp(-720, 840) as i16)
-                        .adjusted_for_timezone();
-                    print!(
-                        "\x1b[2K\r{} | {}",
-                        rtc_time.to_epoch().unwrap(),
-                        rtc_time.timezone_pretty()
-                    );
-                    crate::scheduler::thread::sleep_ms(100);
-                    crate::utils::asm::halt();
-                }
-            }
-            #[cfg(target_arch = "aarch64")]
-            {
-                todo!()
-            }
-        }
-        "clear" => {
-            print!("\x1b[2J\x1b[H");
-        }
-        "lspci" => {
-            crate::device::pci::pci_enumerate();
-            for device in crate::device::pci::PCI_DEVICES.lock().iter() {
+                let rtc_time = crate::arch::drivers::time::rtc::RtcTime::current()
+                    .with_timezone_offset(zone.clamp(-720, 840) as i16)
+                    .adjusted_for_timezone();
                 println!(
-                    "{:02x}:{:02x}:{} {} {:04X}:{:04X} [0x{:X}:0x{:X}:0x{:X}]",
-                    device.address.bus,
-                    device.address.device,
-                    device.address.function,
-                    device.name,
-                    device.vendor_id,
-                    device.device_id,
-                    device.class_code,
-                    device.subclass,
-                    device.prog_if,
-                );
+                    "{} | {}",
+                    rtc_time.datetime_pretty(),
+                    rtc_time.timezone_pretty()
+                )
             }
-        }
-        #[cfg(target_arch = "x86_64")]
-        "pwd" => {
-            let cwd = crate::scheduler::current_process()
-                .unwrap()
-                .lock()
-                .get_cwd()
-                .clone();
-            println!("{cwd}");
-        }
-        #[cfg(target_arch = "x86_64")]
-        "cd" => {
-            let cwd = crate::scheduler::current_process()
-                .unwrap()
-                .lock()
-                .get_cwd()
-                .clone();
-            let path = if args.is_empty() {
-                fs::Path::new("/home")
-            } else {
-                let p = fs::Path::new(args[0]);
-                if let Some(new_p) = fs::get_vfs()
-                    .resolve_path(cwd.clone())
-                    .unwrap()
-                    .resolve_path(p.clone())
-                {
-                    new_p.get_path().clone()
-                } else {
-                    println!("cd: {}: No such file or directory", p);
-                    return;
+            "clear" => {
+                print!("\x1b[2J\x1b[H");
+            }
+            "lspci" => {
+                crate::device::pci::pci_enumerate();
+                for device in crate::device::pci::PCI_DEVICES.lock().iter() {
+                    println!(
+                        "{:02x}:{:02x}:{} {} {:04X}:{:04X} [0x{:X}:0x{:X}:0x{:X}]",
+                        device.address.bus,
+                        device.address.device,
+                        device.address.function,
+                        device.name,
+                        device.vendor_id,
+                        device.device_id,
+                        device.class_code,
+                        device.subclass,
+                        device.prog_if,
+                    );
                 }
-            };
-            crate::scheduler::current_process()
-                .unwrap()
-                .lock()
-                .set_cwd(path);
-        }
-        #[cfg(target_arch = "x86_64")]
-        "ls" => {
-            let cwd = crate::scheduler::current_process()
-                .unwrap()
-                .lock()
-                .get_cwd()
-                .clone();
-            let path = if args.is_empty() {
-                cwd.clone()
-            } else {
-                let p = fs::Path::new(args[0]);
-                if let Some(new_p) = fs::get_vfs()
-                    .resolve_path(cwd.clone())
+            }
+            #[cfg(target_arch = "x86_64")]
+            "pwd" => {
+                let cwd = crate::scheduler::current_process()
                     .unwrap()
-                    .resolve_path(p.clone())
-                {
-                    new_p.get_path().clone()
+                    .lock()
+                    .get_cwd()
+                    .clone();
+                println!("{cwd}");
+            }
+            #[cfg(target_arch = "x86_64")]
+            "cd" => {
+                let cwd = crate::scheduler::current_process()
+                    .unwrap()
+                    .lock()
+                    .get_cwd()
+                    .clone();
+                let path = if args.is_empty() {
+                    fs::Path::new("/home")
                 } else {
-                    println!("ls: {}: No such file or directory", p);
-                    return;
-                }
-            };
-            let vfs = fs::get_vfs();
-            for child in vfs
-                .resolve_path(path)
-                .unwrap_or_else(|| vfs.resolve_path(cwd).unwrap())
-                .get_children()
-            {
-                print!(
-                    "{}{}{} ",
-                    if child.is_dir() {
-                        color::BLUE
-                    } else if child.get_permissions().execute {
-                        color::GREEN
+                    let p = fs::Path::new(args[0]);
+                    let full_path = if p.is_absolute() {
+                        p.clone()
                     } else {
-                        color::WHITE_BRIGHT
-                    },
-                    child.get_name(),
-                    color::RESET
-                );
-            }
-            println!();
-        }
-        #[cfg(target_arch = "x86_64")]
-        "mkdir" => {
-            if args.is_empty() {
-                println!("mkdir: what name dumass");
-                return;
-            }
-            let cwd = crate::scheduler::current_process()
-                .unwrap()
-                .lock()
-                .get_cwd()
-                .clone();
-            let vfs = fs::get_vfs();
-            let dir = vfs.resolve_path_mut(cwd).unwrap();
-            for arg in args {
-                if dir.create_dir(arg).is_none() {
-                    println!("mkdir: {arg}: already exists");
-                }
-            }
-        }
-        #[cfg(target_arch = "x86_64")]
-        "touch" => {
-            if args.is_empty() {
-                println!("touch: what name dumass");
-                return;
-            }
-            let cwd = crate::scheduler::current_process()
-                .unwrap()
-                .lock()
-                .get_cwd()
-                .clone();
-            let vfs = fs::get_vfs();
-            let dir = vfs.resolve_path_mut(cwd).unwrap();
-            for arg in args {
-                if dir.create_file(arg).is_none() {
-                    println!("touch: {arg}: already exists");
-                }
-            }
-        }
-        #[cfg(target_arch = "x86_64")]
-        "cat" => {
-            if args.is_empty() {
-                println!("cat: what file dumass");
-                return;
-            }
-            let path = fs::Path::new(args[0]);
-            let cwd = crate::scheduler::current_process()
-                .unwrap()
-                .lock()
-                .get_cwd()
-                .clone();
-            let vfs = fs::get_vfs();
-            if let Some(file) = vfs.resolve_path(cwd).unwrap().resolve_path(path.clone()) {
-                match file.read() {
-                    Some(data) => println!("{}", str::from_utf8(data).unwrap()),
-                    None => println!("cat: {}: is a directory", path),
-                }
-            } else {
-                println!("cat: no such file");
-            }
-        }
-        #[cfg(target_arch = "x86_64")]
-        "rm" => {
-            if args.is_empty() {
-                println!("rm: what dumass");
-                return;
-            }
-            let path = fs::Path::new(args[0]);
-            let cwd = crate::scheduler::current_process()
-                .unwrap()
-                .lock()
-                .get_cwd()
-                .clone();
-            let vfs = fs::get_vfs();
-            let target_path = match vfs
-                .resolve_path(cwd.clone())
-                .unwrap()
-                .resolve_path(path.clone())
-            {
-                Some(node) => node.get_path().clone(),
-                None => {
-                    println!("rm: no such item");
-                    return;
-                }
-            };
-            let name = target_path.get_name().to_string();
-            let parent_path = target_path.get_parent();
-            let Some(parent) = vfs.resolve_path_mut(parent_path) else {
-                println!("rm: no such item");
-                return;
-            };
-            if !parent.remove_child(&name) {
-                println!("rm: no such item");
-            }
-        }
-        "color" => {
-            let fg = if !args.is_empty() {
-                match args[0] {
-                    "0" => color::BLACK.to_string(),
-                    "1" => color::BLUE.to_string(),
-                    "2" => color::GREEN.to_string(),
-                    "3" => color::CYAN.to_string(),
-                    "4" => color::RED.to_string(),
-                    "5" => color::PURPLE.to_string(),
-                    "6" => color::YELLOW.to_string(),
-                    "7" => color::WHITE.to_string(),
-                    "8" => color::GRAY.to_string(),
-                    "9" => color::BLUE.to_string(),
-                    "a" => color::LIGHT_GREEN.to_string(),
-                    "b" => color::CYAN.to_string(),
-                    "c" => color::LIGHT_RED.to_string(),
-                    "d" => color::PINK.to_string(),
-                    "e" => color::YELLOW.to_string(),
-                    "f" => color::WHITE_BRIGHT.to_string(),
-                    x => {
-                        let is_valid = |hex: &str| -> bool {
-                            if !hex.starts_with("#") || hex.len() != 7 {
-                                return false;
-                            }
-                            let is_valid_hex = |h: u8| -> bool {
-                                h.is_ascii_digit()
-                                    || (b'a'..=b'f').contains(&h)
-                                    || (b'A'..=b'F').contains(&h)
-                            };
-                            let mut valid = true;
-                            for i in 1..7 {
-                                if !is_valid_hex(hex.as_bytes()[i]) {
-                                    valid = false;
-                                    break;
-                                }
-                            }
-                            valid
-                        };
-                        if is_valid(x) {
-                            let r = u8::from_str_radix(&x[1..3], 16).unwrap_or(0);
-                            let g = u8::from_str_radix(&x[3..5], 16).unwrap_or(0);
-                            let b = u8::from_str_radix(&x[5..7], 16).unwrap_or(0);
-                            color::rgb(r, g, b, false)
-                        } else {
-                            color::RESET.to_string()
-                        }
-                    }
-                }
-            } else {
-                color::RESET.to_string()
-            };
-
-            shell.color_fg = fg;
-
-            let mut bg = shell.color_bg.as_str();
-
-            if bg == color::RESET {
-                bg = "";
-            }
-
-            println!("{}{}", shell.color_fg, bg);
-        }
-        "bg" => {
-            let bg = if !args.is_empty() {
-                match args[0] {
-                    "0" => color::BLACK_BG.to_string(),
-                    "1" => color::BLUE_BG.to_string(),
-                    "2" => color::GREEN_BG.to_string(),
-                    "3" => color::CYAN_BG.to_string(),
-                    "4" => color::RED_BG.to_string(),
-                    "5" => color::PURPLE_BG.to_string(),
-                    "6" => color::YELLOW_BG.to_string(),
-                    "7" => color::WHITE_BG.to_string(),
-                    "8" => color::GRAY_BG.to_string(),
-                    "9" => color::BLUE_BG.to_string(),
-                    "a" => color::LIGHT_GREEN_BG.to_string(),
-                    "b" => color::CYAN_BG.to_string(),
-                    "c" => color::LIGHT_RED_BG.to_string(),
-                    "d" => color::PINK_BG.to_string(),
-                    "e" => color::YELLOW_BG.to_string(),
-                    "f" => color::WHITE_BRIGHT_BG.to_string(),
-                    x => {
-                        let is_valid = |hex: &str| -> bool {
-                            if !hex.starts_with("#") || hex.len() != 7 {
-                                return false;
-                            }
-                            let is_valid_hex = |h: u8| -> bool {
-                                h.is_ascii_digit()
-                                    || (b'a'..=b'f').contains(&h)
-                                    || (b'A'..=b'F').contains(&h)
-                            };
-                            let mut valid = true;
-                            for i in 1..7 {
-                                if !is_valid_hex(hex.as_bytes()[i]) {
-                                    valid = false;
-                                    break;
-                                }
-                            }
-                            valid
-                        };
-                        if is_valid(x) {
-                            let r = u8::from_str_radix(&x[1..3], 16).unwrap_or(0);
-                            let g = u8::from_str_radix(&x[3..5], 16).unwrap_or(0);
-                            let b = u8::from_str_radix(&x[5..7], 16).unwrap_or(0);
-                            color::rgb(r, g, b, true)
-                        } else {
-                            color::RESET.to_string()
-                        }
-                    }
-                }
-            } else {
-                color::RESET.to_string()
-            };
-
-            shell.color_bg = bg;
-
-            let mut fg = shell.color_fg.as_str();
-
-            if fg == color::RESET {
-                fg = "";
-            }
-
-            println!("{}{}", shell.color_bg, fg);
-        }
-        "echo" => {
-            println!("{}", args.join(" "));
-        }
-        "nooo" => {
-            println!("\n{}\n", crate::NOOO);
-        }
-        "tasks" => {
-            #[cfg(target_arch = "x86_64")]
-            {
-                crate::utils::asm::without_ints(|| {
-                    let scheduler = crate::scheduler::get_scheduler();
-
-                    println!("Processes running: {}", scheduler.processes.len());
-
-                    for process in scheduler.processes.iter() {
-                        let p = process.lock();
-
-                        println!("Process [{}] '{}':", p.get_pid(), p.get_name());
-
-                        for thread in p.get_children().iter() {
-                            let t = thread.lock();
-                            println!(
-                                "  Thread [{}] '{}': {:?}",
-                                t.tid,
-                                t.get_name(),
-                                t.get_status()
-                            );
-                        }
-                    }
-                });
-            }
-            #[cfg(target_arch = "aarch64")]
-            {
-                todo!()
-            }
-        }
-        "kill" => {
-            #[cfg(target_arch = "x86_64")]
-            {
-                if let Ok(pid) = args[0].parse::<u64>() {
-                    if pid == 0 {
-                        println!("congrats dumass, you just killed pid 0, which is the kernel");
+                        cwd.join(args[0])
+                    };
+                    if let Some(new_p) = fs::get_vfs().resolve_path(full_path) {
+                        new_p.get_path().clone()
+                    } else {
+                        println!("cd: {}: No such file or directory", p);
                         return;
                     }
-                    if crate::scheduler::kill_process(pid) {
-                        println!("process {} terminated", pid);
-                    } else {
-                        println!("process {} not found", pid);
-                    }
+                };
+                crate::scheduler::current_process()
+                    .unwrap()
+                    .lock()
+                    .set_cwd(path);
+            }
+            #[cfg(target_arch = "x86_64")]
+            "ls" => {
+                let cwd = crate::scheduler::current_process()
+                    .unwrap()
+                    .lock()
+                    .get_cwd()
+                    .clone();
+                let path = if args.is_empty() {
+                    cwd.clone()
                 } else {
-                    println!("invalid pid");
+                    let p = fs::Path::new(args[0]);
+                    let full_path = if p.is_absolute() {
+                        p.clone()
+                    } else {
+                        cwd.join(args[0])
+                    };
+
+                    if let Some(new_p) = fs::get_vfs().resolve_path(full_path) {
+                        new_p.get_path().clone()
+                    } else {
+                        println!("ls: {}: No such file or directory", p);
+                        return;
+                    }
+                };
+                let vfs = fs::get_vfs();
+                for child in vfs
+                    .resolve_path(path)
+                    .unwrap_or_else(|| vfs.resolve_path(cwd).unwrap())
+                    .get_children()
+                {
+                    print!(
+                        "{}{}{} ",
+                        if child.is_dir() {
+                            color::BLUE
+                        } else if child.get_permissions().execute {
+                            color::GREEN
+                        } else {
+                            color::WHITE_BRIGHT
+                        },
+                        child.get_name(),
+                        color::RESET
+                    );
+                }
+                println!();
+            }
+            #[cfg(target_arch = "x86_64")]
+            "mkdir" => {
+                if args.is_empty() {
+                    println!("mkdir: what name dumass");
+                    return;
+                }
+                let cwd = crate::scheduler::current_process()
+                    .unwrap()
+                    .lock()
+                    .get_cwd()
+                    .clone();
+                let vfs = fs::get_vfs();
+                let dir = vfs.resolve_path_mut(cwd).unwrap();
+                for arg in args {
+                    if dir.create_dir(arg).is_none() {
+                        println!("mkdir: {arg}: already exists");
+                    }
                 }
             }
-            #[cfg(target_arch = "aarch64")]
-            {
-                todo!()
-            }
-        }
-        "shutdown" => {
             #[cfg(target_arch = "x86_64")]
-            acpi::perform_power_action(acpi::PowerAction::Shutdown);
-            #[cfg(target_arch = "aarch64")]
-            unsafe {
-                core::arch::asm!("mov x0, {0:x}", "hvc #0", in(reg) 0x84000008u64);
+            "touch" => {
+                if args.is_empty() {
+                    println!("touch: what name dumass");
+                    return;
+                }
+                let cwd = crate::scheduler::current_process()
+                    .unwrap()
+                    .lock()
+                    .get_cwd()
+                    .clone();
+                let vfs = fs::get_vfs();
+                let dir = vfs.resolve_path_mut(cwd).unwrap();
+                for arg in args {
+                    if dir.create_file(arg).is_none() {
+                        println!("touch: {arg}: already exists");
+                    }
+                }
             }
-        }
-        "reboot" => {
-            acpi::perform_power_action(acpi::PowerAction::Reboot);
-        }
-        "sleep" => {
-            acpi::perform_power_action(acpi::PowerAction::Sleep);
-        }
-        "hibernate" => {
-            acpi::perform_power_action(acpi::PowerAction::Hibernate);
-        }
-        "pagefault" => {
-            unsafe { *(0xdeadbeef as *mut u8) = 42 };
-        }
-        "panic" => {
-            panic!("{}", args.join(" ").as_str());
-        }
-        "" => {}
-        x => {
-            println!("command not found - '{x}'\nrun 'help' to see the list of available commands");
+            #[cfg(target_arch = "x86_64")]
+            "cat" => {
+                if args.is_empty() {
+                    println!("cat: what file dumass");
+                    return;
+                }
+                let path = fs::Path::new(args[0]);
+                let cwd = crate::scheduler::current_process()
+                    .unwrap()
+                    .lock()
+                    .get_cwd()
+                    .clone();
+                let full_path = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    cwd.join(args[0])
+                };
+                let vfs = fs::get_vfs();
+                if let Some(file) = vfs.resolve_path(full_path) {
+                    match file.read() {
+                        Some(data) => println!("{}", str::from_utf8(data).unwrap()),
+                        None => println!("cat: {}: is a directory", path),
+                    }
+                } else {
+                    println!("cat: no such file");
+                }
+            }
+            #[cfg(target_arch = "x86_64")]
+            "rm" => {
+                if args.is_empty() {
+                    println!("rm: what dumass");
+                    return;
+                }
+                let path = fs::Path::new(args[0]);
+                let cwd = crate::scheduler::current_process()
+                    .unwrap()
+                    .lock()
+                    .get_cwd()
+                    .clone();
+                let full_path = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    cwd.join(args[0])
+                };
+                let vfs = fs::get_vfs();
+                let target_path = match vfs.resolve_path(full_path) {
+                    Some(node) => node.get_path().clone(),
+                    None => {
+                        println!("rm: no such item");
+                        return;
+                    }
+                };
+                let name = target_path.get_name().to_string();
+                let parent_path = target_path.get_parent();
+                let Some(parent) = vfs.resolve_path_mut(parent_path) else {
+                    println!("rm: no such item");
+                    return;
+                };
+                if !parent.remove_child(&name) {
+                    println!("rm: no such item");
+                }
+            }
+            "color" => {
+                let fg = if !args.is_empty() {
+                    match args[0] {
+                        "0" => color::BLACK.to_string(),
+                        "1" => color::BLUE.to_string(),
+                        "2" => color::GREEN.to_string(),
+                        "3" => color::CYAN.to_string(),
+                        "4" => color::RED.to_string(),
+                        "5" => color::PURPLE.to_string(),
+                        "6" => color::YELLOW.to_string(),
+                        "7" => color::WHITE.to_string(),
+                        "8" => color::GRAY.to_string(),
+                        "9" => color::BLUE.to_string(),
+                        "a" => color::LIGHT_GREEN.to_string(),
+                        "b" => color::CYAN.to_string(),
+                        "c" => color::LIGHT_RED.to_string(),
+                        "d" => color::PINK.to_string(),
+                        "e" => color::YELLOW.to_string(),
+                        "f" => color::WHITE_BRIGHT.to_string(),
+                        x => {
+                            let is_valid = |hex: &str| -> bool {
+                                if !hex.starts_with("#") || hex.len() != 7 {
+                                    return false;
+                                }
+                                let is_valid_hex = |h: u8| -> bool {
+                                    h.is_ascii_digit()
+                                        || (b'a'..=b'f').contains(&h)
+                                        || (b'A'..=b'F').contains(&h)
+                                };
+                                let mut valid = true;
+                                for i in 1..7 {
+                                    if !is_valid_hex(hex.as_bytes()[i]) {
+                                        valid = false;
+                                        break;
+                                    }
+                                }
+                                valid
+                            };
+                            if is_valid(x) {
+                                let r = u8::from_str_radix(&x[1..3], 16).unwrap_or(0);
+                                let g = u8::from_str_radix(&x[3..5], 16).unwrap_or(0);
+                                let b = u8::from_str_radix(&x[5..7], 16).unwrap_or(0);
+                                color::rgb(r, g, b, false)
+                            } else {
+                                color::RESET.to_string()
+                            }
+                        }
+                    }
+                } else {
+                    color::RESET.to_string()
+                };
+
+                self.color_fg = fg;
+
+                let mut bg = self.color_bg.as_str();
+
+                if bg == color::RESET {
+                    bg = "";
+                }
+
+                println!("{}{}", self.color_fg, bg);
+            }
+            "bg" => {
+                let bg = if !args.is_empty() {
+                    match args[0] {
+                        "0" => color::BLACK_BG.to_string(),
+                        "1" => color::BLUE_BG.to_string(),
+                        "2" => color::GREEN_BG.to_string(),
+                        "3" => color::CYAN_BG.to_string(),
+                        "4" => color::RED_BG.to_string(),
+                        "5" => color::PURPLE_BG.to_string(),
+                        "6" => color::YELLOW_BG.to_string(),
+                        "7" => color::WHITE_BG.to_string(),
+                        "8" => color::GRAY_BG.to_string(),
+                        "9" => color::BLUE_BG.to_string(),
+                        "a" => color::LIGHT_GREEN_BG.to_string(),
+                        "b" => color::CYAN_BG.to_string(),
+                        "c" => color::LIGHT_RED_BG.to_string(),
+                        "d" => color::PINK_BG.to_string(),
+                        "e" => color::YELLOW_BG.to_string(),
+                        "f" => color::WHITE_BRIGHT_BG.to_string(),
+                        x => {
+                            let is_valid = |hex: &str| -> bool {
+                                if !hex.starts_with("#") || hex.len() != 7 {
+                                    return false;
+                                }
+                                let is_valid_hex = |h: u8| -> bool {
+                                    h.is_ascii_digit()
+                                        || (b'a'..=b'f').contains(&h)
+                                        || (b'A'..=b'F').contains(&h)
+                                };
+                                let mut valid = true;
+                                for i in 1..7 {
+                                    if !is_valid_hex(hex.as_bytes()[i]) {
+                                        valid = false;
+                                        break;
+                                    }
+                                }
+                                valid
+                            };
+                            if is_valid(x) {
+                                let r = u8::from_str_radix(&x[1..3], 16).unwrap_or(0);
+                                let g = u8::from_str_radix(&x[3..5], 16).unwrap_or(0);
+                                let b = u8::from_str_radix(&x[5..7], 16).unwrap_or(0);
+                                color::rgb(r, g, b, true)
+                            } else {
+                                color::RESET.to_string()
+                            }
+                        }
+                    }
+                } else {
+                    color::RESET.to_string()
+                };
+
+                self.color_bg = bg;
+
+                let mut fg = self.color_fg.as_str();
+
+                if fg == color::RESET {
+                    fg = "";
+                }
+
+                println!("{}{}", self.color_bg, fg);
+            }
+            "echo" => {
+                println!("{}", args.join(" "));
+            }
+            "nooo" => {
+                println!("\n{}\n", crate::NOOO);
+            }
+            "tasks" => {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    crate::utils::asm::without_ints(|| {
+                        let scheduler = crate::scheduler::get_scheduler();
+
+                        println!("Processes running: {}", scheduler.processes.len());
+
+                        for process in scheduler.processes.iter() {
+                            let p = process.lock();
+
+                            println!("Process [{}] '{}':", p.get_pid(), p.get_name());
+
+                            for thread in p.get_children().iter() {
+                                let t = thread.lock();
+                                println!(
+                                    "  Thread [{}] '{}': {:?}",
+                                    t.tid,
+                                    t.get_name(),
+                                    t.get_status()
+                                );
+                            }
+                        }
+                    });
+                }
+                #[cfg(target_arch = "aarch64")]
+                {
+                    todo!()
+                }
+            }
+            "kill" => {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    if let Ok(pid) = args[0].parse::<u64>() {
+                        if pid == 0 {
+                            println!("congrats dumass, you just killed pid 0, which is the kernel");
+                            return;
+                        }
+                        if crate::scheduler::kill_process(pid) {
+                            println!("process {} terminated", pid);
+                        } else {
+                            println!("process {} not found", pid);
+                        }
+                    } else {
+                        println!("invalid pid");
+                    }
+                }
+                #[cfg(target_arch = "aarch64")]
+                {
+                    todo!()
+                }
+            }
+            "shutdown" => {
+                #[cfg(target_arch = "x86_64")]
+                acpi::perform_power_action(acpi::PowerAction::Shutdown);
+                #[cfg(target_arch = "aarch64")]
+                unsafe {
+                    core::arch::asm!("mov x0, {0:x}", "hvc #0", in(reg) 0x84000008u64);
+                }
+            }
+            "reboot" => {
+                acpi::perform_power_action(acpi::PowerAction::Reboot);
+            }
+            "sleep" => {
+                acpi::perform_power_action(acpi::PowerAction::Sleep);
+            }
+            "hibernate" => {
+                acpi::perform_power_action(acpi::PowerAction::Hibernate);
+            }
+            "pagefault" => {
+                unsafe { *(0xdeadbeef as *mut u8) = 42 };
+            }
+            "panic" => {
+                panic!("{}", args.join(" ").as_str());
+            }
+            "" => {}
+            x => {
+                println!(
+                    "command not found - '{x}'\nrun 'help' to see the list of available commands"
+                );
+            }
         }
     }
 }

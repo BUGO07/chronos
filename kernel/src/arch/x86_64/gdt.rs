@@ -36,7 +36,7 @@ pub struct GdtEntry {
 }
 
 impl GdtEntry {
-    const fn null() -> Self {
+    pub const fn null() -> Self {
         GdtEntry {
             limit_low: 0,
             base_low: 0,
@@ -46,7 +46,7 @@ impl GdtEntry {
             base_high: 0,
         }
     }
-    const fn kernel_code() -> Self {
+    pub const fn kernel_code() -> Self {
         GdtEntry {
             limit_low: 0,
             base_low: 0,
@@ -56,7 +56,7 @@ impl GdtEntry {
             base_high: 0,
         }
     }
-    const fn kernel_data() -> Self {
+    pub const fn kernel_data() -> Self {
         GdtEntry {
             limit_low: 0,
             base_low: 0,
@@ -66,7 +66,7 @@ impl GdtEntry {
             base_high: 0,
         }
     }
-    const fn user_code_32bit() -> Self {
+    pub const fn user_code_32bit() -> Self {
         GdtEntry {
             limit_low: 0,
             base_low: 0,
@@ -76,7 +76,7 @@ impl GdtEntry {
             base_high: 0,
         }
     }
-    const fn user_code() -> Self {
+    pub const fn user_code() -> Self {
         GdtEntry {
             limit_low: 0,
             base_low: 0,
@@ -86,7 +86,7 @@ impl GdtEntry {
             base_high: 0,
         }
     }
-    const fn user_data() -> Self {
+    pub const fn user_data() -> Self {
         GdtEntry {
             limit_low: 0,
             base_low: 0,
@@ -95,6 +95,14 @@ impl GdtEntry {
             granularity: 0b0010_0000,
             base_high: 0,
         }
+    }
+    pub const fn as_u64(&self) -> u64 {
+        (self.limit_low as u64)
+            | ((self.base_low as u64) << 16)
+            | ((self.base_middle as u64) << 32)
+            | ((self.access as u64) << 40)
+            | ((self.granularity as u64) << 48)
+            | ((self.base_high as u64) << 56)
     }
 }
 
@@ -148,8 +156,8 @@ pub struct GlobalDescriptorTable {
     kernel_code: GdtEntry,
     kernel_data: GdtEntry,
     user_code_32bit: GdtEntry,
-    user_code: GdtEntry,
     user_data: GdtEntry,
+    user_code: GdtEntry,
     tss: TssEntry,
 }
 
@@ -166,8 +174,8 @@ impl GlobalDescriptorTable {
             kernel_code: GdtEntry::kernel_code(),
             kernel_data: GdtEntry::kernel_data(),
             user_code_32bit: GdtEntry::user_code_32bit(),
-            user_code: GdtEntry::user_code(),
             user_data: GdtEntry::user_data(),
+            user_code: GdtEntry::user_code(),
             tss: TssEntry::null(),
         }
     }
@@ -218,8 +226,8 @@ lazy_static::lazy_static! {
             kernel_code: SegmentSelector::new(1, 0, 0),
             kernel_data: SegmentSelector::new(2, 0, 0),
             _user_code_32bit: SegmentSelector::new(3, 0, 3),
-            _user_code: SegmentSelector::new(4, 0, 3),
-            _user_data: SegmentSelector::new(5, 0, 3),
+            _user_data: SegmentSelector::new(4, 0, 3),
+            _user_code: SegmentSelector::new(5, 0, 3),
             tss: SegmentSelector::new(6, 0, 0),
         }
     };
@@ -229,8 +237,8 @@ struct Selectors {
     kernel_code: SegmentSelector,
     kernel_data: SegmentSelector,
     _user_code_32bit: SegmentSelector,
-    _user_code: SegmentSelector,
     _user_data: SegmentSelector,
+    _user_code: SegmentSelector,
     tss: SegmentSelector,
 }
 

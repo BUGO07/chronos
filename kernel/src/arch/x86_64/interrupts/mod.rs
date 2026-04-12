@@ -8,12 +8,12 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use crate::{arch::interrupts::syscall::SyscallId, debug};
+use crate::debug;
 
 pub mod pic;
 pub mod syscall;
 
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
 pub struct StackFrame {
     pub r15: u64,
@@ -162,7 +162,6 @@ isr_table:
     "#
 }
 
-type HandlerFn = fn(frame: *mut StackFrame);
 static HANDLERS: [AtomicPtr<()>; 256] = [const { AtomicPtr::new(core::ptr::null_mut()) }; 256];
 static mut IDT: [IdtEntry; 256] = [IdtEntry::new(); 256];
 static mut IDTR: IdtPtr = IdtPtr {
@@ -206,52 +205,35 @@ const EXCEPTION_NAMES: [&str; 32] = [
 ];
 
 #[unsafe(no_mangle)]
-extern "C" fn isr_handler(regs: *mut StackFrame) {
-    unsafe {
-        let registers = &*regs;
-        if registers.vector < 32 {
-            match registers.vector {
-                1..=3 => {
-                    debug!(
-                        "exception: {},\n{:#018x?}",
-                        EXCEPTION_NAMES[registers.vector as usize], registers
-                    );
-                    return;
-                }
-                _ => {
-                    panic!(
-                        "exception: {},\n{:#018x?}",
-                        EXCEPTION_NAMES[registers.vector as usize], registers
-                    );
-                }
+extern "C" fn isr_handler(regs: &mut StackFrame) {
+    if regs.vector < 32 {
+        match regs.vector {
+            1..=3 => {
+                debug!(
+                    "exception: {},\n{:#018x?}",
+                    EXCEPTION_NAMES[regs.vector as usize], regs
+                );
+                return;
+            }
+            _ => {
+                panic!(
+                    "exception: {},\n{:#018x?}",
+                    EXCEPTION_NAMES[regs.vector as usize], regs
+                );
             }
         }
+    }
 
-        if registers.vector == 0x80 {
-            let id = registers.rax;
-            let a0 = registers.rdi;
-            let a1 = registers.rsi;
-            let a2 = registers.rdx;
-            let a3 = registers.r10;
-            let a4 = registers.r8;
-            let a5 = registers.r9;
-            syscall::syscall_handler(
-                core::mem::transmute::<u64, SyscallId>(id),
-                a0,
-                a1,
-                a2,
-                a3,
-                a4,
-                a5,
-            );
-        }
+    if regs.vector == 0x80 {
+        syscall::syscall_handler(regs);
+        return;
+    }
 
-        let handler_ptr = HANDLERS[registers.vector as usize].load(Ordering::Acquire);
-        if !handler_ptr.is_null() {
-            let handler: HandlerFn = core::mem::transmute(handler_ptr);
-            handler(regs);
-        }
-    };
+    let handler_ptr = HANDLERS[regs.vector as usize].load(Ordering::Acquire);
+    if !handler_ptr.is_null() {
+        let handler: fn(&mut StackFrame) = unsafe { core::mem::transmute(handler_ptr) };
+        handler(regs);
+    }
 }
 
 unsafe extern "C" {
@@ -274,22 +256,24 @@ pub fn init() {
         IDTR.base = IDT.as_ptr() as u64;
 
         asm!("cli; lidt [{}]", in(reg) &IDTR, options(readonly, nostack, preserves_flags));
-
-        install_interrupt(
-            0x20,
-            crate::arch::drivers::time::pit::timer_interrupt_handler,
-        );
-        install_interrupt(
-            0x21,
-            crate::arch::drivers::keyboard::keyboard_interrupt_handler,
-        );
     }
+
+    install_interrupt(
+        0x20,
+        crate::arch::drivers::time::pit::timer_interrupt_handler,
+    );
+    install_interrupt(
+        0x21,
+        crate::arch::drivers::keyboard::keyboard_interrupt_handler,
+    );
+
+    syscall::init();
 }
 
-pub fn install_interrupt(vector: u8, func: HandlerFn) {
-    HANDLERS[vector as usize].store(func as *mut (), Ordering::Release);
+pub fn install_interrupt(vector: u8, func: fn(&mut StackFrame)) {
+    HANDLERS[vector as usize].store(func as _, Ordering::Release);
 }
 
 pub fn clear_interrupt(vector: u8) {
-    HANDLERS[vector as usize].store(core::ptr::null_mut(), Ordering::Release);
+    HANDLERS[vector as usize].store(0 as _, Ordering::Release);
 }

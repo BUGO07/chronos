@@ -3,12 +3,11 @@
     Released under EUPL 1.2 License
 */
 
-use crate::utils::spinlock::SpinLock;
+use crate::utils::spinlock::Spin;
 use crate::{memory::get_memory_init_stage, serial_print};
 use alloc::vec::Vec;
 use core::{
     alloc::Layout,
-    ffi::c_void,
     fmt::{self, Write},
     ptr::null_mut,
     sync::atomic::{AtomicU64, Ordering},
@@ -17,7 +16,7 @@ use core::{
 use super::limine::get_framebuffers;
 
 lazy_static::lazy_static! {
-    pub static ref WRITERS: SpinLock<Vec<Writer>> = SpinLock::new(Writer::new());
+    pub static ref WRITERS: Spin<Vec<Writer>> = Spin::new(Writer::new());
 }
 
 pub struct Writer {
@@ -28,11 +27,11 @@ unsafe impl Send for Writer {}
 unsafe impl Sync for Writer {}
 
 extern "C" fn malloc(size: usize) -> *mut core::ffi::c_void {
-    unsafe { alloc::alloc::alloc(Layout::from_size_align(size, 0x10).unwrap()) as *mut c_void }
+    unsafe { alloc::alloc::alloc(Layout::from_size_align(size, 0x10).unwrap()) as _ }
 }
 
 extern "C" fn free(ptr: *mut core::ffi::c_void, size: usize) {
-    unsafe { alloc::alloc::dealloc(ptr as *mut u8, Layout::from_size_align(size, 0x10).unwrap()) };
+    unsafe { alloc::alloc::dealloc(ptr as _, Layout::from_size_align(size, 0x10).unwrap()) };
 }
 
 const FONT: &[u8] = include_bytes!("../../res/font.bin");
@@ -54,10 +53,10 @@ impl Writer {
                         ctx: flanterm_sys::flanterm_fb_init(
                             Some(malloc),
                             Some(free),
-                            framebuffer.address() as *mut u32,
-                            framebuffer.width as usize,
-                            framebuffer.height as usize,
-                            framebuffer.pitch as usize,
+                            framebuffer.address() as _,
+                            framebuffer.width as _,
+                            framebuffer.height as _,
+                            framebuffer.pitch as _,
                             framebuffer.red_mask_size,
                             framebuffer.red_mask_shift,
                             framebuffer.green_mask_size,
@@ -71,7 +70,7 @@ impl Writer {
                             null_mut(),
                             null_mut(),
                             null_mut(),
-                            FONT.as_ptr() as *mut core::ffi::c_void,
+                            FONT.as_ptr() as _,
                             FONT_WIDTH,
                             FONT_HEIGHT,
                             FONT_SPACING,
@@ -90,11 +89,8 @@ impl Writer {
     }
 
     fn write(&mut self, s: &str) {
-        #[cfg(target_arch = "x86_64")]
-        let buf = s.as_ptr() as *const i8;
-        #[cfg(target_arch = "aarch64")]
         let buf = s.as_ptr();
-        unsafe { flanterm_sys::flanterm_write(self.ctx, buf, s.len()) };
+        unsafe { flanterm_sys::flanterm_write(self.ctx, buf as _, s.len()) };
     }
 }
 

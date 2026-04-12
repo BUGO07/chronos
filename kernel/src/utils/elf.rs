@@ -3,7 +3,7 @@
     Released under EUPL 1.2 License
 */
 
-use core::{alloc::Layout, ffi::c_void};
+use core::alloc::Layout;
 
 use crate::{
     debug,
@@ -59,7 +59,7 @@ pub struct ElfInfo {
 }
 
 pub fn load_elf(data: &[u8], pagemap: &mut Pagemap) -> Result<ElfInfo, &'static str> {
-    if data.len() < core::mem::size_of::<Elf64Ehdr>() {
+    if data.len() < size_of::<Elf64Ehdr>() {
         return Err("ELF too small");
     }
 
@@ -151,9 +151,11 @@ pub fn load_elf(data: &[u8], pagemap: &mut Pagemap) -> Result<ElfInfo, &'static 
         }
 
         if phdr.p_filesz > 0 {
-            let dest = (alloc_ptr as u64 + (phdr.p_vaddr - vaddr_base)) as *mut c_void;
-            let src = unsafe { data.as_ptr().add(phdr.p_offset as usize) } as *const c_void;
-            memcpy(dest, src, phdr.p_filesz as usize);
+            memcpy(
+                (alloc_ptr as u64 + (phdr.p_vaddr - vaddr_base)) as _,
+                unsafe { data.as_ptr().add(phdr.p_offset as usize) } as _,
+                phdr.p_filesz as usize,
+            );
         }
 
         debug!(

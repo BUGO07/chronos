@@ -5,7 +5,7 @@
 
 use core::{
     alloc::Layout,
-    ffi::{CStr, c_void},
+    ffi::CStr,
     ptr::null_mut,
     sync::atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering},
 };
@@ -20,7 +20,7 @@ use crate::{
         pci_config_write_u8, pci_config_write_u16, pci_config_write_u32,
     },
     error, info,
-    utils::{limine::get_rsdp_address, mutex::Mutex, spinlock::SpinLock},
+    utils::{limine::get_rsdp_address, mutex::Mutex, spinlock::Spin},
     warn,
 };
 
@@ -52,7 +52,7 @@ extern "C" fn uacpi_kernel_pci_device_open(
 
     let id = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
     PCI_HANDLES.lock().insert(id, pci_addr);
-    unsafe { *handle = id as *mut c_void };
+    unsafe { *handle = id as _ };
     UACPI_STATUS_OK
 }
 
@@ -176,7 +176,7 @@ extern "C" fn uacpi_kernel_io_map(
     _: uacpi_size,
     handle: uacpi_handle,
 ) -> uacpi_status {
-    unsafe { *(handle as *mut u64) = base }
+    unsafe { *(handle as *mut _) = base }
     UACPI_STATUS_OK
 }
 
@@ -286,7 +286,7 @@ extern "C" fn uacpi_kernel_io_write32(
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn uacpi_kernel_map(_addr: uacpi_phys_addr, _len: uacpi_size) -> *mut c_void {
+extern "C" fn uacpi_kernel_map(_addr: uacpi_phys_addr, _len: uacpi_size) -> *mut () {
     #[cfg(target_arch = "x86_64")]
     {
         let hhdm = crate::utils::limine::get_hhdm_offset();
@@ -297,51 +297,44 @@ extern "C" fn uacpi_kernel_map(_addr: uacpi_phys_addr, _len: uacpi_size) -> *mut
         for i in (0..size).step_by(psize as usize) {
             unsafe {
                 PAGEMAP
-                    .get_mut()
+                    .get()
                     .unwrap()
                     .lock()
                     .map(paddr + hhdm + i, paddr + i, flag::RW, psize)
                     .ok();
             };
         }
-        (_addr + hhdm) as *mut c_void
+        (_addr + hhdm) as _
     }
     #[cfg(target_arch = "aarch64")]
     null_mut()
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn uacpi_kernel_unmap(_addr: *mut c_void, _len: uacpi_size) {}
+extern "C" fn uacpi_kernel_unmap(_addr: *mut (), _len: uacpi_size) {}
 
 #[unsafe(no_mangle)]
-extern "C" fn uacpi_kernel_alloc(size: uacpi_size) -> *mut c_void {
+extern "C" fn uacpi_kernel_alloc(size: usize) -> *mut u8 {
     unsafe {
         let mem = alloc::alloc::alloc(
-            Layout::from_size_align(
-                size + core::mem::size_of::<usize>(),
-                core::mem::align_of::<usize>(),
-            )
-            .unwrap(),
+            Layout::from_size_align(size + size_of::<usize>(), align_of::<usize>()).unwrap(),
         );
         if mem.is_null() {
             return null_mut();
         }
-        *(mem as *mut usize) = size;
-        mem.add(core::mem::size_of::<usize>()) as *mut c_void
+        *(mem as *mut _) = size;
+        mem.add(size_of::<usize>())
     }
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn uacpi_kernel_free(mem: *mut c_void) {
+extern "C" fn uacpi_kernel_free(mem: *mut u8) {
     unsafe {
         if !mem.is_null() {
-            let real_mem = (mem as *mut u8).sub(core::mem::size_of::<usize>());
+            let real_mem = mem.sub(size_of::<usize>());
             let size = *(real_mem as *const usize);
-            let layout = Layout::from_size_align(
-                size + core::mem::size_of::<usize>(),
-                core::mem::align_of::<usize>(),
-            )
-            .unwrap();
+            let layout =
+                Layout::from_size_align(size + size_of::<usize>(), align_of::<usize>()).unwrap();
             alloc::alloc::dealloc(real_mem, layout);
         }
     }
@@ -393,7 +386,7 @@ extern "C" fn uacpi_kernel_sleep(msec: uacpi_u64) {
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_create_mutex() -> uacpi_handle {
     let mutex = Box::new(Mutex::new(()));
-    Box::into_raw(mutex) as *mut c_void
+    Box::into_raw(mutex) as _
 }
 
 #[unsafe(no_mangle)]
@@ -431,8 +424,8 @@ impl SimpleEvent {
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_create_event() -> uacpi_handle {
-    let b = Box::new(SimpleEvent::default());
-    Box::leak(b) as *mut SimpleEvent as uacpi_handle
+    let event = Box::new(SimpleEvent::default());
+    Box::into_raw(event) as _
 }
 
 #[unsafe(no_mangle)]
@@ -484,7 +477,7 @@ extern "C" fn uacpi_kernel_release_mutex(handle: uacpi_handle) {
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_wait_for_event(handle: uacpi_handle, timeout: uacpi_u16) -> uacpi_bool {
-    let event = unsafe { &mut *(handle as *mut SimpleEvent) };
+    let event = unsafe { &*(handle as *const SimpleEvent) };
     if timeout == 0xFFFF {
         while !event.decrement() {
             uacpi_kernel_sleep(10);
@@ -505,13 +498,13 @@ extern "C" fn uacpi_kernel_wait_for_event(handle: uacpi_handle, timeout: uacpi_u
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_signal_event(handle: uacpi_handle) {
-    let event = unsafe { &mut *(handle as *mut SimpleEvent) };
+    let event = unsafe { &*(handle as *const SimpleEvent) };
     event.counter.fetch_add(1, Ordering::AcqRel);
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_reset_event(handle: uacpi_handle) {
-    let event = unsafe { &mut *(handle as *mut SimpleEvent) };
+    let event = unsafe { &*(handle as *const SimpleEvent) };
     event.counter.store(0, Ordering::Release);
 }
 
@@ -524,7 +517,7 @@ extern "C" fn uacpi_kernel_handle_firmware_request(
 
 static UACPI_INTERRUPT_IRQ: AtomicU8 = AtomicU8::new(0xFF); // 0xFF = no handler
 static UACPI_INTERRUPT_HANDLER_PTR: AtomicPtr<()> = AtomicPtr::new(null_mut());
-static UACPI_INTERRUPT_CTX: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+static UACPI_INTERRUPT_CTX: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(null_mut());
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_install_interrupt_handler(
@@ -537,7 +530,7 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
         let vector = (irq + 0x20) as u8;
 
         if let Some(f) = func {
-            UACPI_INTERRUPT_HANDLER_PTR.store(f as *mut (), Ordering::SeqCst);
+            UACPI_INTERRUPT_HANDLER_PTR.store(f as _, Ordering::SeqCst);
         }
         UACPI_INTERRUPT_CTX.store(ctx, Ordering::SeqCst);
         UACPI_INTERRUPT_IRQ.store(irq as u8, Ordering::SeqCst);
@@ -553,7 +546,7 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
 }
 
 #[cfg(target_arch = "x86_64")]
-fn handle_uacpi_interrupt(_stack_frame: *mut crate::arch::interrupts::StackFrame) {
+fn handle_uacpi_interrupt(_stack_frame: &mut crate::arch::interrupts::StackFrame) {
     let irq = UACPI_INTERRUPT_IRQ.load(Ordering::SeqCst);
     let handler_ptr = UACPI_INTERRUPT_HANDLER_PTR.load(Ordering::SeqCst);
     let ctx = UACPI_INTERRUPT_CTX.load(Ordering::SeqCst);
@@ -602,14 +595,14 @@ extern "C" fn uacpi_kernel_restore_interrupts(state: uacpi_interrupt_state) {
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_create_spinlock() -> uacpi_handle {
-    let lock = Box::new(SpinLock::new(()));
-    Box::into_raw(lock) as *mut c_void
+    let lock = Box::new(Spin::new(()));
+    Box::into_raw(lock) as _
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn uacpi_kernel_free_spinlock(handle: uacpi_handle) {
     if !handle.is_null() {
-        let _ = unsafe { Box::from_raw(handle as *mut SpinLock<()>) };
+        let _ = unsafe { Box::from_raw(handle as *mut Spin<()>) };
     }
 }
 
@@ -622,7 +615,7 @@ extern "C" fn uacpi_kernel_lock_spinlock(handle: uacpi_handle) -> uacpi_cpu_flag
     if ints_enabled {
         crate::utils::asm::toggle_ints(false);
     }
-    let lock = unsafe { &*(handle as *const SpinLock<()>) };
+    let lock = unsafe { &*(handle as *const Spin<()>) };
     lock.lock_no_guard();
     if ints_enabled { 1 } else { 0 }
 }
@@ -632,7 +625,7 @@ extern "C" fn uacpi_kernel_unlock_spinlock(handle: uacpi_handle, flags: uacpi_cp
     if handle.is_null() {
         return;
     }
-    let lock = unsafe { &*(handle as *const SpinLock<()>) };
+    let lock = unsafe { &*(handle as *const Spin<()>) };
     unsafe { lock.force_unlock() };
     if flags != 0 {
         crate::utils::asm::toggle_ints(true);

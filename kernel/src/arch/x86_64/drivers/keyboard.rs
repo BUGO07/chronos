@@ -22,37 +22,7 @@ pub struct KeyboardState {
     pub keys_down: Vec<KeyCode>,
 }
 
-pub fn keyboard_interrupt_handler(_stack_frame: *mut StackFrame) {
+pub fn keyboard_interrupt_handler(_stack_frame: &mut StackFrame) {
     unsafe { KEYBOARD_STATE.get_mut().scancodes.push_back(inb(0x60)) };
     crate::arch::interrupts::pic::send_eoi(1);
-}
-
-pub fn keyboard_thread() -> ! {
-    crate::arch::interrupts::pic::unmask(1);
-    loop {
-        let keyboard_state = unsafe { KEYBOARD_STATE.get_mut() };
-        if !keyboard_state.scancodes.is_empty() {
-            let scancode = keyboard_state.scancodes.pop_front().unwrap();
-            let keys_down = &mut keyboard_state.keys_down;
-            if let Ok(Some(key_event)) = keyboard_state.keyboard.add_byte(scancode) {
-                if key_event.state == pc_keyboard::KeyState::Down {
-                    if !keys_down.contains(&key_event.code) {
-                        keys_down.push(key_event.code);
-                    }
-                } else {
-                    keys_down.retain(|&x| x != key_event.code);
-                }
-
-                if let Some(dc) = keyboard_state.keyboard.process_keyevent(key_event) {
-                    unsafe {
-                        if let Some(shell) = crate::utils::shell::SHELL.get_mut() {
-                            shell.event_queue.push_back((dc, KEYBOARD_STATE.get_mut()));
-                        }
-                    }
-                }
-            }
-        } else {
-            crate::scheduler::thread::yld();
-        }
-    }
 }

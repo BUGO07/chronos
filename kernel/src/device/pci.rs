@@ -8,9 +8,9 @@ use core::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(target_arch = "x86_64")]
 use crate::utils::asm::port::{inl, outl};
-use crate::utils::spinlock::SpinLock;
+use crate::utils::spinlock::Spin;
 
-pub static PCI_DEVICES: SpinLock<Vec<PciDevice>> = SpinLock::new(Vec::new());
+pub static PCI_DEVICES: Spin<Vec<PciDevice>> = Spin::new(Vec::new());
 pub static MCFG_ADDRESS: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
@@ -47,7 +47,7 @@ impl PciAddress {
         let function = self.function as u64;
         let offset = (offset as u64) & !0x3;
         (MCFG_ADDRESS.load(Ordering::Relaxed)
-            + ((bus << 20) | (device << 15) | (function << 12) | offset)) as *mut u32
+            + ((bus << 20) | (device << 15) | (function << 12) | offset)) as _
     }
 }
 

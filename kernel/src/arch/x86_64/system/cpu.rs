@@ -9,10 +9,10 @@ use limine::mp::MpInfo;
 use crate::{
     info,
     scheduler::cooperative,
-    utils::{limine::get_mp_response, spinlock::SpinLock},
+    utils::{limine::get_mp_response, spinlock::Spin},
 };
 
-static PROCESSORS: SpinLock<Vec<&MpInfo>> = SpinLock::new(Vec::new());
+static PROCESSORS: Spin<Vec<&MpInfo>> = Spin::new(Vec::new());
 
 pub fn init_bsp() {
     let mp = get_mp_response();

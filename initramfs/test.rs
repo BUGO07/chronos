@@ -1,90 +1,183 @@
-use core::{
-    alloc::Layout,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+#![no_std]
+#![no_main]
 
-use alloc::boxed::Box;
+use core::{arch::asm, fmt::Write};
 
-use crate::{
-    arch::interrupts::StackFrame,
-    info,
-    memory::KERNEL_STACK_SIZE,
-    print,
-    utils::asm::regs::{rdmsr, wrmsr},
-};
-
-#[repr(C)]
-struct SyscallCpuData {
-    _reserved: u64,
-    user_rsp: u64,
-    kernel_rsp: u64,
+#[unsafe(no_mangle)]
+pub extern "C" fn _start() -> ! {
+    println!("Hello from the test process!");
+    sleep_ms(1000);
+    println!("Goodbye from the test process!");
+    panic!("This is a test panic!");
 }
 
-core::arch::global_asm! {
-    r#"
-.extern syscall_handler
-syscall_entry:
-    swapgs
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    println!("{}", info);
+    sys_exit(1);
+}
 
-    mov gs:[8], rsp
-    mov rsp, gs:[16]
+#[inline(always)]
+fn sys_exit(code: u64) -> ! {
+    syscall!(SyscallId::Exit, code);
+    sys_yield();
+    unsafe { core::hint::unreachable_unchecked() }
+}
 
-    push 0x23 # ss
-    push gs:[8] # rsp
-    push r11 # rflags
-    push 0x2B # cs
-    push rcx # rip
-    push 0 # error_code
-    push 0 # vector
+#[inline(always)]
+fn sys_sleep(ns: u64) {
+    syscall!(SyscallId::Nanosleep, ns);
+}
 
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    push rbp
-    push r8
-    push r9
-    push r10
-    push r11
-    push r12
-    push r13
-    push r14
-    push r15
+#[inline(always)]
+fn sleep_us(us: u64) {
+    sys_sleep(us * 1_000);
+}
 
-    sti
-    mov rdi, rsp
-    call syscall_handler
-    cli
+#[inline(always)]
+fn sleep_ms(ms: u64) {
+    sys_sleep(ms * 1_000_000);
+}
 
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop r11
-    pop r10
-    pop r9
-    pop r8
-    pop rbp
-    pop rdi
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
+#[inline(always)]
+fn sys_yield() {
+    syscall!(SyscallId::SchedYield);
+}
 
-    add rsp, 16
+#[inline(always)]
+fn sys_write(fd: i32, buf: *const u8, count: usize) -> isize {
+    syscall!(SyscallId::Write, fd, buf, count) as isize
+}
 
-    pop rcx
-    add rsp, 8
-    pop r11
-    pop rsp
+pub struct Writer;
 
-    swapgs
-    sysretq
-.global syscall_entry
-    "#
+impl Write for Writer {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        sys_write(1, s.as_ptr(), s.len());
+        Ok(())
+    }
+}
+
+#[doc(hidden)]
+pub fn _print(args: ::core::fmt::Arguments) {
+    write!(Writer, "{args}").ok();
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {
+        $crate::_print(format_args!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! println {
+    () => ($crate::print!("\n"));
+    ($fmt:expr) => ($crate::print!(concat!($fmt, "\n")));
+    ($fmt:expr, $($arg:tt)*) => ($crate::print!(
+        concat!($fmt, "\n"), $($arg)*));
+}
+
+#[macro_export]
+macro_rules! syscall {
+    ($id:expr) => {{
+        let ret: u64;
+        unsafe {
+            asm!(
+                "syscall",
+                in("rax") $id as u64,
+                lateout("rax") ret,
+            );
+        }
+        ret
+    }};
+    ($id:expr, $a0:expr) => {{
+        let ret: u64;
+        unsafe {
+            asm!(
+                "syscall",
+                in("rax") $id as u64,
+                in("rdi") $a0 as u64,
+                lateout("rax") ret,
+            );
+        }
+        ret
+    }};
+    ($id:expr, $a0:expr, $a1:expr) => {{
+        let ret: u64;
+        unsafe {
+            asm!(
+                "syscall",
+                in("rax") $id as u64,
+                in("rdi") $a0 as u64,
+                in("rsi") $a1 as u64,
+                lateout("rax") ret,
+            );
+        }
+        ret
+    }};
+    ($id:expr, $a0:expr, $a1:expr, $a2:expr) => {{
+        let ret: u64;
+        unsafe {
+            asm!(
+                "syscall",
+                in("rax") $id as u64,
+                in("rdi") $a0 as u64,
+                in("rsi") $a1 as u64,
+                in("rdx") $a2 as u64,
+                lateout("rax") ret,
+            );
+        }
+        ret
+    }};
+    ($id:expr, $a0:expr, $a1:expr, $a2:expr, $a3:expr) => {{
+        let ret: u64;
+        unsafe {
+            asm!(
+                "syscall",
+                in("rax") $id as u64,
+                in("rdi") $a0 as u64,
+                in("rsi") $a1 as u64,
+                in("rdx") $a2 as u64,
+                in("r10") $a3 as u64,
+                lateout("rax") ret,
+            );
+        }
+        ret
+    }};
+    ($id:expr, $a0:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr) => {{
+        let ret: u64;
+        unsafe {
+            asm!(
+                "syscall",
+                in("rax") $id as u64,
+                in("rdi") $a0 as u64,
+                in("rsi") $a1 as u64,
+                in("rdx") $a2 as u64,
+                in("r10") $a3 as u64,
+                in("r8")  $a4 as u64,
+                lateout("rax") ret,
+            );
+        }
+        ret
+    }};
+    ($id:expr, $a0:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr) => {{
+        let ret: u64;
+        unsafe {
+            asm!(
+                "syscall",
+                in("rax") $id as u64,
+                in("rdi") $a0 as u64,
+                in("rsi") $a1 as u64,
+                in("rdx") $a2 as u64,
+                in("r10") $a3 as u64,
+                in("r8")  $a4 as u64,
+                in("r9")  $a5 as u64,
+                lateout("rax") ret,
+            );
+        }
+        ret
+    }};
 }
 
 #[repr(u64)]
@@ -422,89 +515,4 @@ pub enum SyscallId {
     PkeyAlloc,
     PkeyFree,
     Statx,
-}
-
-static HANDLERS: [AtomicPtr<()>; 333] = [const { AtomicPtr::new(sys_stub as _) }; 333];
-
-#[unsafe(no_mangle)]
-pub extern "C" fn syscall_handler(regs: &mut StackFrame) {
-    let id = regs.rax;
-    let handler_ptr = HANDLERS[id as usize].load(Ordering::Acquire);
-    if !handler_ptr.is_null() {
-        let handler: fn(&mut StackFrame) = unsafe { core::mem::transmute(handler_ptr) };
-        handler(regs);
-    }
-}
-
-unsafe extern "C" {
-    fn syscall_entry();
-}
-
-fn sys_stub(regs: &mut StackFrame) {
-    info!(
-        "syscall {} with args {} {} {} {} {} {}",
-        regs.rax, regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9
-    );
-}
-
-fn sys_exit(regs: &mut StackFrame) {
-    let pid = crate::scheduler::current_process()
-        .unwrap()
-        .lock()
-        .get_pid();
-    info!("process {} exited with code {}", pid, regs.rdi);
-    crate::scheduler::kill_process(pid);
-}
-
-fn sys_nanosleep(regs: &mut StackFrame) {
-    crate::scheduler::thread::sleep(regs.rdi);
-}
-
-fn sys_yield(_regs: &mut StackFrame) {
-    crate::scheduler::thread::yield_();
-}
-
-fn sys_write(regs: &mut StackFrame) {
-    let fd = regs.rdi;
-    let buf = regs.rsi as *const u8;
-    let count = regs.rdx;
-
-    if fd == 1 {
-        let slice = unsafe { core::slice::from_raw_parts(buf, count as usize) };
-        if let Ok(s) = core::str::from_utf8(slice) {
-            print!("{}", s);
-        } else {
-            print!("{:?}", slice);
-        }
-        regs.rax = count;
-    } else {
-        unimplemented!()
-    }
-}
-
-pub fn init() {
-    HANDLERS[SyscallId::Exit as usize].store(sys_exit as _, Ordering::Release);
-    HANDLERS[SyscallId::Nanosleep as usize].store(sys_nanosleep as _, Ordering::Release);
-    HANDLERS[SyscallId::SchedYield as usize].store(sys_yield as _, Ordering::Release);
-    HANDLERS[SyscallId::Write as usize].store(sys_write as _, Ordering::Release);
-    // IA32_EFER syscall
-    wrmsr(0xC0000080, rdmsr(0xC0000080) | (1 << 0));
-    // IA32_STAR
-    wrmsr(0xC0000081, (0x18_u64 << 48) | (0x08_u64 << 32));
-    // IA32_LSTAR handler
-    wrmsr(0xC0000082, syscall_entry as *const () as _);
-    // IA32_FMASK rflags mask
-    wrmsr(0xC0000084, !2);
-
-    let kernel_stack = unsafe {
-        alloc::alloc::alloc(Layout::from_size_align(KERNEL_STACK_SIZE, 0x10).unwrap()) as u64
-            + KERNEL_STACK_SIZE as u64
-    };
-    let cpu_data = Box::into_raw(Box::new(SyscallCpuData {
-        _reserved: 0,
-        user_rsp: 0,
-        kernel_rsp: kernel_stack,
-    }));
-    // IA32_KERNEL_GS_BASE
-    wrmsr(0xC0000102, cpu_data as u64);
 }

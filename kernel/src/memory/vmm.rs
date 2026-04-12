@@ -10,7 +10,7 @@ use crate::{
     debug, info,
     utils::{
         limine::{get_executable_address, get_executable_file, get_hhdm_offset, get_memory_map},
-        spinlock::SpinLock,
+        spinlock::Spin,
     },
 };
 
@@ -33,7 +33,7 @@ pub mod flag {
     pub const TABLE_FLAGS: u64 = PRESENT | WRITE | USER;
 }
 
-pub static mut PAGEMAP: OnceCell<Arc<SpinLock<Pagemap>>> = OnceCell::new();
+pub static mut PAGEMAP: OnceCell<Arc<Spin<Pagemap>>> = OnceCell::new();
 
 unsafe impl Send for Pagemap {}
 unsafe impl Sync for Pagemap {}
@@ -142,7 +142,7 @@ fn alloc_table() -> *mut u64 {
         if ptr.is_null() {
             panic!("vmm: failed to allocate page table");
         }
-        (ptr as u64 - get_hhdm_offset()) as *mut u64
+        (ptr as u64 - get_hhdm_offset()) as _
     }
 }
 
@@ -181,7 +181,7 @@ fn get_next_level(
             let addr = (*entry & flag::PADDR_MASK)
                 .checked_add(hhdm)
                 .ok_or("vmm: address overflow in get_next_level")?;
-            return Ok(addr as *mut u64);
+            return Ok(addr as _);
         }
 
         if is_large(*entry) {
@@ -213,7 +213,7 @@ fn get_next_level(
 
             let entry_val = *current_level.add(idx as usize);
             let addr = (entry_val & flag::PADDR_MASK) + hhdm;
-            return Ok(addr as *mut u64);
+            return Ok(addr as _);
         }
 
         let next_level = alloc_table() as u64;
@@ -223,7 +223,7 @@ fn get_next_level(
 
         *entry = next_level | flag::TABLE_FLAGS;
 
-        Ok((next_level + hhdm) as *mut u64)
+        Ok((next_level + hhdm) as _)
     }
 }
 
@@ -289,7 +289,7 @@ pub fn init() {
 
     unsafe {
         core::arch::asm!("mov cr3, {}", in(reg) pmap.top_level as u64, options(nostack));
-        PAGEMAP.set(Arc::new(SpinLock::new(pmap))).ok();
+        PAGEMAP.set(Arc::new(Spin::new(pmap))).ok();
     }
     info!("done");
 }

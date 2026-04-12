@@ -52,7 +52,7 @@ pub fn init() {
             #[cfg(target_arch = "x86_64")]
             for i in (0..(256 * 1024 * 1024)).step_by(page_size::MEDIUM as usize) {
                 PAGEMAP
-                    .get_mut()
+                    .get()
                     .unwrap()
                     .lock()
                     .map(virt + i, addr + i, flag::RW, page_size::MEDIUM)

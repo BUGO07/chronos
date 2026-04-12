@@ -108,7 +108,7 @@ impl VfsNode for Directory {
         &mut self.metadata
     }
     fn get_type(&self) -> &VfsNodeType {
-        &self.get_metadata().r#type
+        &self.get_metadata().type_
     }
     fn get_path(&self) -> &Path {
         &self.path
@@ -197,7 +197,7 @@ impl VfsNode for File {
         &mut self.metadata
     }
     fn get_type(&self) -> &VfsNodeType {
-        &self.get_metadata().r#type
+        &self.get_metadata().type_
     }
     fn get_path(&self) -> &Path {
         &self.path
@@ -328,31 +328,26 @@ pub fn init() {
         let tar = module.data();
         for item in crate::utils::ustar::TarIter::new(tar) {
             if let Some(data) = crate::utils::ustar::tar_lookup(tar, item.name) {
-                debug!(
-                    "creating {} - {}",
-                    if item.name.ends_with("/") {
-                        "folder"
-                    } else {
-                        "file"
-                    },
-                    &item.name[1..]
-                );
-                if item.name.ends_with("/") {
-                    if &item.name[1..] == "/" {
-                        continue;
-                    }
-                    let path = Path::new(&item.name[1..item.name.len() - 1]);
+                debug!("creating {:?} - {}", item.type_, &item.name[1..]);
+                match item.type_ {
+                    VfsNodeType::Directory => {
+                        if &item.name[1..] == "/" {
+                            continue;
+                        }
+                        let path = Path::new(&item.name[1..item.name.len() - 1]);
 
-                    if let Some(parent) = vfs.resolve_path_mut(path.get_parent()) {
-                        parent.create_dir(path.get_name()).unwrap();
+                        if let Some(parent) = vfs.resolve_path_mut(path.get_parent()) {
+                            parent.create_dir(path.get_name()).unwrap();
+                        }
                     }
-                } else {
-                    let path = Path::new(&item.name[1..]);
+                    VfsNodeType::File => {
+                        let path = Path::new(&item.name[1..]);
 
-                    if let Some(parent) = vfs.resolve_path_mut(path.get_parent())
-                        && let Some(file) = parent.create_file(path.get_name())
-                    {
-                        file.write_all(data);
+                        if let Some(parent) = vfs.resolve_path_mut(path.get_parent())
+                            && let Some(file) = parent.create_file(path.get_name())
+                        {
+                            file.write_all(data);
+                        }
                     }
                 }
             }

@@ -16,7 +16,7 @@ use crate::{
         USER_STACK_SIZE,
         vmm::{flag, page_size},
     },
-    utils::{limine::get_hhdm_offset, spinlock::SpinLock},
+    utils::{asm::without_ints, limine::get_hhdm_offset, spinlock::Spin},
 };
 use alloc::sync::{Arc, Weak};
 
@@ -48,7 +48,7 @@ pub struct Thread {
     pub kstack_alloc: u64,
     pub ustack_alloc: u64,
     pub regs: StackFrame,
-    parent: Weak<SpinLock<Process>>,
+    parent: Weak<Spin<Process>>,
     status: Status,
     pub runtime: u64,
     pub schedule_time: u64,
@@ -71,43 +71,27 @@ impl PartialEq for Thread {
     }
 }
 
-impl PartialOrd for Thread {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl Eq for Thread {}
-
-impl Ord for Thread {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        (self.runtime, self.gtid).cmp(&(other.runtime, other.gtid))
-    }
-}
 
 unsafe impl Sync for Thread {}
 unsafe impl Send for Thread {}
 
 impl Thread {
-    pub fn new(
-        proc: &'static Arc<SpinLock<Process>>,
-        func: *const (),
-        name: &'static str,
-        user: bool,
-    ) -> Self {
+    pub fn new(proc: &Arc<Spin<Process>>, func: *const (), name: &'static str, user: bool) -> Self {
         let tid = proc.lock().next_tid();
         Self::new_with_tid(proc, func, name, user, tid)
     }
     pub fn new_with_tid(
-        proc: &'static Arc<SpinLock<Process>>,
+        proc: &Arc<Spin<Process>>,
         func: *const (),
         name: &'static str,
         user: bool,
         tid: u64,
     ) -> Self {
-        let kstack_alloc = unsafe {
-            alloc::alloc::alloc(Layout::from_size_align(KERNEL_STACK_SIZE, 16).unwrap()) as u64
-        };
+        let kstack_ptr =
+            unsafe { alloc::alloc::alloc(Layout::from_size_align(KERNEL_STACK_SIZE, 16).unwrap()) };
+        assert!(!kstack_ptr.is_null(), "failed to allocate kernel stack");
+        let kstack_alloc = kstack_ptr as u64;
         let kstack = kstack_alloc;
 
         let mut ustack: u64 = 0;
@@ -115,10 +99,11 @@ impl Thread {
 
         if user {
             let alloc_ptr = unsafe {
-                alloc::alloc::alloc(Layout::from_size_align(USER_STACK_SIZE, 16).unwrap()) as u64
+                alloc::alloc::alloc(Layout::from_size_align(USER_STACK_SIZE, 16).unwrap())
             };
-            ustack_alloc = alloc_ptr;
-            let phys = alloc_ptr - get_hhdm_offset();
+            assert!(!alloc_ptr.is_null(), "failed to allocate user stack");
+            ustack_alloc = alloc_ptr as u64;
+            let phys = ustack_alloc - get_hhdm_offset();
             let mut locked = proc.lock();
             ustack = locked.next_stack_address();
             for i in (0..USER_STACK_SIZE).step_by(page_size::SMALL as usize) {
@@ -145,9 +130,9 @@ impl Thread {
             ustack_alloc,
             regs: StackFrame {
                 #[cfg(target_arch = "x86_64")]
-                cs: if user { 0x20 | 0x03 } else { 0x08 },
+                cs: if user { 0x28 | 0x03 } else { 0x08 },
                 #[cfg(target_arch = "x86_64")]
-                ss: if user { 0x28 | 0x03 } else { 0x10 },
+                ss: if user { 0x20 | 0x03 } else { 0x10 },
                 #[cfg(target_arch = "x86_64")]
                 rsp: if user {
                     ustack + USER_STACK_SIZE as u64
@@ -156,10 +141,6 @@ impl Thread {
                 },
                 #[cfg(target_arch = "x86_64")]
                 rip: func as u64,
-                // #[cfg(target_arch = "x86_64")]
-                // cs: crate::utils::asm::regs::get_cs_reg() as u64,
-                // #[cfg(target_arch = "x86_64")]
-                // ss: crate::utils::asm::regs::get_ss_reg() as u64,
                 #[cfg(target_arch = "x86_64")]
                 rflags: 0x202,
 
@@ -183,12 +164,12 @@ impl Thread {
         self.name
     }
 
-    pub fn get_parent(&self) -> &Weak<SpinLock<Process>> {
+    pub fn get_parent(&self) -> &Weak<Spin<Process>> {
         &self.parent
     }
 
-    pub fn get_status(&self) -> &Status {
-        &self.status
+    pub fn get_status(&self) -> Status {
+        self.status
     }
 
     pub fn set_status(&mut self, status: Status) {
@@ -196,25 +177,27 @@ impl Thread {
     }
 }
 
-pub fn spawn(
-    proc: &'static Arc<SpinLock<Process>>,
-    func: *const (),
-    name: &'static str,
-    user: bool,
-) -> u64 {
-    let thread = Arc::new(SpinLock::new(Thread::new(proc, func, name, user)));
-    proc.lock().get_children_mut().push(thread.clone());
-    let tid = thread.lock().tid;
-    enqueue(thread);
-    tid
+pub fn spawn(proc: &Arc<Spin<Process>>, func: *const (), name: &'static str, user: bool) -> u64 {
+    without_ints(|| {
+        let thread = Arc::new(Spin::new(Thread::new(proc, func, name, user)));
+        proc.lock().get_children_mut().push(thread.clone());
+        let tid = thread.lock().tid;
+        get_scheduler().queue.push_back(thread);
+        tid
+    })
 }
 
 pub fn sleep(ns: u64) {
+    use crate::utils::asm::{int_status, toggle_ints};
+    let was_enabled = int_status();
+    toggle_ints(false);
     if let Some(thread) = current_thread() {
-        let mut t = thread.lock();
-        t.set_status(Status::Sleeping(preferred_timer_ns() + ns));
+        thread
+            .lock()
+            .set_status(Status::Sleeping(preferred_timer_ns() + ns));
     }
-    yld();
+    yield_();
+    toggle_ints(was_enabled);
 }
 
 #[inline(always)]
@@ -222,7 +205,7 @@ pub fn sleep_ms(ms: u64) {
     sleep(ms * 1_000_000);
 }
 
-pub fn yld() {
+pub fn yield_() {
     unsafe {
         #[cfg(target_arch = "x86_64")]
         asm!("int $0xFE");
@@ -232,38 +215,47 @@ pub fn yld() {
 }
 
 pub fn block() {
+    use crate::utils::asm::{int_status, toggle_ints};
+    let was_enabled = int_status();
+    toggle_ints(false);
     if let Some(thread) = current_thread() {
         thread.lock().set_status(Status::Blocked);
-        yld();
     }
+    yield_();
+    toggle_ints(was_enabled);
 }
 
-pub fn wake(thread: &Arc<SpinLock<Thread>>) {
-    let mut t: crate::utils::spinlock::SpinLockGuard<'_, Thread> = thread.lock();
-    if t.get_status() == &Status::Blocked {
-        t.set_status(Status::Ready);
-        enqueue(thread.clone());
-    }
+pub fn wake(thread: &Arc<Spin<Thread>>) {
+    without_ints(|| {
+        let mut t = thread.lock();
+        if t.get_status() == Status::Blocked {
+            t.set_status(Status::Ready);
+            drop(t);
+            get_scheduler().queue.push_back(thread.clone());
+        }
+    });
 }
 
 pub fn terminate() -> ! {
+    crate::utils::asm::toggle_ints(false);
     if let Some(thread) = current_thread() {
         thread.lock().set_status(Status::Terminated);
-        yld();
     }
+    yield_();
     halt_loop()
 }
 
-pub fn idle0() -> &'static Arc<SpinLock<Thread>> {
-    static mut IDLE: OnceCell<Arc<SpinLock<Thread>>> = OnceCell::new();
+pub fn idle0() -> &'static Arc<Spin<Thread>> {
+    static mut IDLE: OnceCell<Arc<Spin<Thread>>> = OnceCell::new();
     unsafe {
         IDLE.get_or_init(|| {
-            let t = Arc::new(SpinLock::new(Thread::new_with_tid(
-                get_proc_by_pid(0).unwrap(),
-                halt_loop as *const (),
+            let proc = get_proc_by_pid(0).unwrap();
+            let t = Arc::new(Spin::new(Thread::new_with_tid(
+                &proc,
+                halt_loop as _,
                 "idle",
                 false,
-                99,
+                0,
             )));
             t.lock().set_status(Status::Ready);
             t
@@ -271,6 +263,6 @@ pub fn idle0() -> &'static Arc<SpinLock<Thread>> {
     }
 }
 
-pub fn current_thread() -> Option<Arc<SpinLock<Thread>>> {
+pub fn current_thread() -> Option<Arc<Spin<Thread>>> {
     get_scheduler_safe().and_then(|x| x.current.clone())
 }

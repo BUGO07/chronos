@@ -29,7 +29,7 @@ pub fn init() {
     debug!("mapping hpet: 0x{:X} -> 0x{:X}", paddr, address);
     unsafe {
         crate::memory::vmm::PAGEMAP
-            .get_mut()
+            .get()
             .unwrap()
             .lock()
             .map(paddr + get_hhdm_offset(), paddr, flag::RW, page_size::SMALL)
@@ -89,7 +89,7 @@ fn supported() -> bool {
 fn hpet_read(offset: u64) -> u64 {
     unsafe {
         core::ptr::read_volatile(
-            (HPET_ADDRESS.load(Ordering::Relaxed) + get_hhdm_offset() + offset) as *const u64,
+            (HPET_ADDRESS.load(Ordering::Relaxed) + get_hhdm_offset() + offset) as _,
         )
     }
 }
@@ -97,7 +97,7 @@ fn hpet_read(offset: u64) -> u64 {
 fn hpet_write(offset: u64, value: u64) {
     unsafe {
         core::ptr::write_volatile(
-            (HPET_ADDRESS.load(Ordering::Relaxed) + get_hhdm_offset() + offset) as *mut u64,
+            (HPET_ADDRESS.load(Ordering::Relaxed) + get_hhdm_offset() + offset) as _,
             value,
         )
     }

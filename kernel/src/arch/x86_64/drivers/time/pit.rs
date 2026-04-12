@@ -10,10 +10,7 @@ use alloc::string::String;
 use crate::{
     arch::interrupts::StackFrame,
     info,
-    utils::{
-        asm::port::outb,
-        time::Timer,
-    },
+    utils::{asm::port::outb, time::Timer},
 };
 
 pub const PIT_FREQUENCY: u32 = 1193182;
@@ -37,7 +34,7 @@ pub fn init() {
     info!("done");
 }
 
-pub fn timer_interrupt_handler(_stack_frame: *mut StackFrame) {
+pub fn timer_interrupt_handler(_stack_frame: &mut StackFrame) {
     pit_tick();
     crate::arch::interrupts::pic::send_eoi(0);
 }

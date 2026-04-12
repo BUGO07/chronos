@@ -68,12 +68,12 @@ pub fn init() {
     info!("done");
 }
 
-fn lapic_oneshot_timer_handler(stack_frame: *mut StackFrame) {
+fn lapic_oneshot_timer_handler(stack_frame: &mut StackFrame) {
     crate::scheduler::schedule(stack_frame);
     mmio_write(reg::EOI, 0);
 }
 
-fn lapic_spurious_handler(_stack_frame: *mut StackFrame) {
+fn lapic_spurious_handler(_stack_frame: &mut StackFrame) {
     // no eoi
 }
 
@@ -123,11 +123,11 @@ fn calibrate_timer() {
 #[inline(always)]
 fn mmio_write(reg: u32, val: u32) {
     let addr = MMIO.load(Ordering::Relaxed) + reg as u64;
-    crate::utils::asm::mmio::write(addr, val as u64, core::mem::size_of::<u32>());
+    crate::utils::asm::mmio::write(addr, val as u64, size_of::<u32>());
 }
 
 #[inline(always)]
 fn mmio_read(reg: u32) -> u32 {
     let addr = MMIO.load(Ordering::Relaxed) + reg as u64;
-    crate::utils::asm::mmio::read(addr, core::mem::size_of::<u32>()) as u32
+    crate::utils::asm::mmio::read(addr, size_of::<u32>()) as u32
 }

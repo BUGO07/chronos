@@ -14,14 +14,12 @@ use crate::{
 pub mod vmm;
 
 pub const KERNEL_STACK_SIZE: usize = 64 * 1024;
-
 pub const USER_STACK_SIZE: usize = 64 * 1024;
-pub const USER_STACK_BASE: usize = 0x800000;
 
 #[global_allocator]
 pub static ALLOCATOR: TalcLock<spin::Mutex<()>, Claim> = TalcLock::new(unsafe {
-    static mut INITIAL_HEAP: [u8; min_first_heap_size::<DefaultBinning>() + 100000] =
-        [0; min_first_heap_size::<DefaultBinning>() + 100000];
+    static mut INITIAL_HEAP: [u8; min_first_heap_size::<DefaultBinning>() + 128 * 1024] =
+        [0; min_first_heap_size::<DefaultBinning>() + 128 * 1024];
 
     Claim::array(&raw mut INITIAL_HEAP)
 });
@@ -46,7 +44,7 @@ pub fn init() {
                     entry.base,
                     entry.base + entry.length
                 );
-                allocator.claim((entry.base + hhdm_offset) as *mut u8, entry.length as usize);
+                allocator.claim((entry.base + hhdm_offset) as _, entry.length as usize);
                 USABLE_MEMORY.fetch_add(entry.length, Ordering::Relaxed);
             } else if entry.type_ == limine::memmap::MEMMAP_RESERVED {
                 RESERVED_MEMORY.fetch_add(entry.length, Ordering::Relaxed);

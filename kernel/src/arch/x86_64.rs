@@ -4,10 +4,13 @@
 */
 
 use crate::{
-    arch::drivers::keyboard::keyboard_thread,
+    arch::drivers::{keyboard::KEYBOARD_STATE, time::preferred_timer_ms},
     drivers::fs::{Path, get_vfs},
+    error,
+    memory::get_reserved_memory,
     print_centered,
-    utils::shell::{cursor_thread, shell_thread},
+    utils::shell::Shell,
+    warn,
 };
 use alloc::{format, vec::Vec};
 use core::{
@@ -89,8 +92,8 @@ pub fn _start() -> ! {
 
     scheduler::init();
     scheduler::thread::spawn(
-        scheduler::get_proc_by_pid(0).unwrap(),
-        main_thread as *const (),
+        &scheduler::get_proc_by_pid(0).unwrap(),
+        main_thread as _,
         "main",
         false,
     );
@@ -146,32 +149,22 @@ pub fn main_thread() -> ! {
 
     info!("usable memory - {}.{:02}GiB", gib, gdecimal);
 
-    // let reserved_bytes = get_reserved_memory();
-    // let mib = reserved_bytes / (1024 * 1024);
-    // let mremainder = reserved_bytes % (1024 * 1024);
-    // let mdecimal = (mremainder * 100) / (1024 * 1024);
-    // info!("reserved memory - {}.{:02}MiB", mib, mdecimal);
+    let reserved_bytes = get_reserved_memory();
+    let mib = reserved_bytes / (1024 * 1024);
+    let mremainder = reserved_bytes % (1024 * 1024);
+    let mdecimal = (mremainder * 100) / (1024 * 1024);
+    info!("reserved memory - {}.{:02}MiB", mib, mdecimal);
 
     info!("icl ts pmo ♥");
 
-    let pid0 = scheduler::get_proc_by_pid(0).unwrap();
+    // let pid0 = scheduler::get_proc_by_pid(0).unwrap();
 
-    scheduler::thread::spawn(pid0, keyboard_thread as *const (), "keyboard", false);
-    // scheduler::thread::spawn(pid0, serial_thread as *const (), "serial", false);
+    // scheduler::thread::spawn(&pid0, keyboard_thread as _, "keyboard", false);
+    // scheduler::thread::spawn(pid0, serial_thread as _, "serial", false);
 
-    let shell_pid = scheduler::spawn_process(
-        unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
-        "shell",
-    );
-    let shell_proc = scheduler::get_proc_by_pid(shell_pid).unwrap();
-    scheduler::thread::spawn(shell_proc, shell_thread as *const (), "main", false);
-    scheduler::thread::spawn(shell_proc, cursor_thread as *const (), "cursor", false);
-
-    // * loading userspace ELF binary
-    let bin = get_vfs()
+    if let Some(bin) = get_vfs()
         .get_root()
-        .resolve_path(Path::new("/bin/test.elf"));
-    if let Some(bin) = bin
+        .resolve_path(Path::new("/bin/test.elf"))
         && let Some(elf_data) = bin.read()
     {
         let elf_proc_pid = scheduler::spawn_process(
@@ -188,19 +181,64 @@ pub fn main_thread() -> ! {
                     elf_info.entry as usize
                 }
                 Err(e) => {
-                    info!("failed to load ELF: {}", e);
+                    error!("failed to load ELF: {}", e);
                     0
                 }
             }
         };
         if entry != 0 {
-            scheduler::thread::spawn(elf_proc, entry as *const (), "elf_main", true);
+            scheduler::thread::spawn(&elf_proc, entry as _, "main", true);
         }
     } else {
-        info!("no bin directory found in root fs");
+        warn!("no bin directory found in root fs");
     }
 
-    halt_loop()
+    // let shell_pid = scheduler::spawn_process(
+    //     unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
+    //     "shell",
+    // );
+    // let shell_proc = scheduler::get_proc_by_pid(shell_pid).unwrap();
+    // scheduler::thread::spawn(&shell_proc, shell_thread as _, "main", false);
+
+    // unmask keyboard
+    crate::arch::interrupts::pic::unmask(1);
+    let mut shell = Shell::new();
+    let mut visible = true;
+    let mut last_blink = preferred_timer_ms();
+    print!("$ ");
+    loop {
+        let keyboard_state = unsafe { KEYBOARD_STATE.get_mut() };
+        while let Some(scancode) = keyboard_state.scancodes.pop_front()
+            && let Ok(Some(key_event)) = keyboard_state.keyboard.add_byte(scancode)
+        {
+            let keys_down = &mut keyboard_state.keys_down;
+            if key_event.state == pc_keyboard::KeyState::Down {
+                if !keys_down.contains(&key_event.code) {
+                    keys_down.push(key_event.code);
+                }
+            } else {
+                keys_down.retain(|&x| x != key_event.code);
+            }
+
+            if let Some(dc) = keyboard_state.keyboard.process_keyevent(key_event) {
+                shell.key_event(dc, keys_down);
+            } else {
+                let now = preferred_timer_ms();
+                if last_blink + 500 < now {
+                    last_blink = now;
+                    if visible {
+                        print!("\x1b[?25h");
+                    } else {
+                        print!("\x1b[?25l");
+                    }
+                    visible = !visible;
+                }
+
+                crate::scheduler::thread::yield_();
+            }
+        }
+        crate::scheduler::thread::yield_();
+    }
 }
 
 pub fn _panic(info: &PanicInfo) -> ! {

@@ -27,17 +27,17 @@ pub struct VfsNodeMetadata {
     pub size: u64,
     pub created_at: u64,
     pub modified_at: u64,
-    pub r#type: VfsNodeType,
+    pub type_: VfsNodeType,
     pub permissions: Permissions,
 }
 
 impl VfsNodeMetadata {
-    pub fn new(r#type: VfsNodeType) -> Self {
+    pub fn new(type_: VfsNodeType) -> Self {
         VfsNodeMetadata {
             size: 0,
             created_at: 0,
             modified_at: 0,
-            r#type,
+            type_,
             permissions: Permissions::new(true, true, false),
         }
     }

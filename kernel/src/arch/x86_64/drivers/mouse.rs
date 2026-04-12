@@ -68,7 +68,7 @@ pub fn init() {
     });
 }
 
-pub fn mouse_interrupt_handler(_stack_frame: *mut StackFrame) {
+pub fn mouse_interrupt_handler(_stack_frame: &mut StackFrame) {
     unsafe {
         let status = inb(STATUS_PORT);
 

@@ -42,8 +42,8 @@ run-bios: $(IMAGE_NAME).iso
 		-enable-kvm \
 		$(QEMUFLAGS)
 
-ramfs.tar:
-	tar --format=ustar -cf $@ -C ramfs ./
+initramfs.tar:
+	tar --format=ustar -cf $@ -C initramfs ./
 
 ovmf/OVMF_x86_64.fd:
 	mkdir -p ovmf
@@ -58,11 +58,11 @@ limine/limine:
 kernel:
 	$(MAKE) -C kernel
 
-$(IMAGE_NAME).iso: limine/limine ramfs.tar kernel
+$(IMAGE_NAME).iso: limine/limine initramfs.tar kernel
 	rm -rf iso_root
 	mkdir -p iso_root/boot
 	cp -v kernel/$(IMAGE_NAME) iso_root/boot/chronos
-	cp -v ramfs.tar iso_root/boot
+	cp -v initramfs.tar iso_root/boot
 	mkdir -p iso_root/boot/limine
 	cp -v limine.conf iso_root/boot/limine/
 	mkdir -p iso_root/EFI/BOOT
@@ -90,6 +90,7 @@ testelf:
 	@if [ -z "$(TESTELF_SRC)" ]; then \
 		echo "usage: make testelf <path/to/file.rs>"; exit 1; \
 	fi
+	mkdir -p $(dir $(abspath $(TESTELF_SRC)))/bin
 	rustc --edition 2024 --target x86_64-unknown-none \
 		-C opt-level=3 -C panic=abort -C relocation-model=static \
 		-C link-arg=-Ttext=0x400000 -C link-arg=--build-id=none \

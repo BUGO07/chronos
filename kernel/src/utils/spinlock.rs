@@ -9,15 +9,15 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-pub struct SpinLock<T: ?Sized> {
+pub struct Spin<T: ?Sized> {
     lock: AtomicBool,
     data: UnsafeCell<T>,
 }
 
-unsafe impl<T: ?Sized + Send> Sync for SpinLock<T> {}
-unsafe impl<T: ?Sized + Send> Send for SpinLock<T> {}
+unsafe impl<T: ?Sized + Send> Sync for Spin<T> {}
+unsafe impl<T: ?Sized + Send> Send for Spin<T> {}
 
-impl<T: Sized> SpinLock<T> {
+impl<T: Sized> Spin<T> {
     pub const fn new(data: T) -> Self {
         Self {
             lock: AtomicBool::new(false),
@@ -26,8 +26,8 @@ impl<T: Sized> SpinLock<T> {
     }
 }
 
-impl<T: ?Sized> SpinLock<T> {
-    pub fn lock(&self) -> SpinLockGuard<'_, T> {
+impl<T: ?Sized> Spin<T> {
+    pub fn lock(&self) -> SpinGuard<'_, T> {
         while self
             .lock
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -35,16 +35,16 @@ impl<T: ?Sized> SpinLock<T> {
         {
             core::hint::spin_loop();
         }
-        SpinLockGuard { lock: self }
+        SpinGuard { spin: self }
     }
 
-    pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
+    pub fn try_lock(&self) -> Option<SpinGuard<'_, T>> {
         if self
             .lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
-            Some(SpinLockGuard { lock: self })
+            Some(SpinGuard { spin: self })
         } else {
             None
         }
@@ -69,44 +69,41 @@ impl<T: ?Sized> SpinLock<T> {
     }
 }
 
-impl<T: Sized> SpinLock<T> {
+impl<T: Sized> Spin<T> {
     pub fn into_inner(self) -> T {
         self.data.into_inner()
     }
 }
 
-impl<T: Sized + Debug> Debug for SpinLock<T> {
+impl<T: Sized + Debug> Debug for Spin<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self.try_lock() {
-            Some(guard) => f.debug_struct("SpinLock").field("inner", &*guard).finish(),
-            None => f
-                .debug_struct("SpinLock")
-                .field("inner", &"<locked>")
-                .finish(),
+            Some(guard) => f.debug_struct("Spin").field("inner", &*guard).finish(),
+            None => f.debug_struct("Spin").field("inner", &"<locked>").finish(),
         }
     }
 }
 
-pub struct SpinLockGuard<'a, T: ?Sized> {
-    lock: &'a SpinLock<T>,
+pub struct SpinGuard<'a, T: ?Sized> {
+    spin: &'a Spin<T>,
 }
 
-impl<'a, T: ?Sized> core::ops::Deref for SpinLockGuard<'a, T> {
+impl<'a, T: ?Sized> core::ops::Deref for SpinGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &*self.lock.data.get() }
+        unsafe { &*self.spin.data.get() }
     }
 }
 
-impl<'a, T: ?Sized> core::ops::DerefMut for SpinLockGuard<'a, T> {
+impl<'a, T: ?Sized> core::ops::DerefMut for SpinGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.lock.data.get() }
+        unsafe { &mut *self.spin.data.get() }
     }
 }
 
-impl<'a, T: ?Sized> Drop for SpinLockGuard<'a, T> {
+impl<'a, T: ?Sized> Drop for SpinGuard<'a, T> {
     fn drop(&mut self) {
-        self.lock.lock.store(false, Ordering::Release);
+        self.spin.lock.store(false, Ordering::Release);
     }
 }

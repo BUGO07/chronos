@@ -1,5 +1,8 @@
+use crate::drivers::fs::VfsNodeType;
+
 pub struct TarHeader<'a> {
     pub name: &'a str,
+    pub type_: VfsNodeType,
     pub start: usize,
     pub end: usize,
 }
@@ -24,7 +27,18 @@ fn parse_header<'a>(archive: &'a [u8], offset: usize) -> Option<TarHeader<'a>> {
         return None;
     }
 
+    let type_ = match header[156] {
+        b'0' => VfsNodeType::File,
+        b'5' => VfsNodeType::Directory,
+        _ => return None,
+    };
+
     let size = oct2bin(&header[0x7c..0x7c + 11]);
+    let start = offset + 512;
+    let end = start + size;
+    if end > archive.len() {
+        return None;
+    }
 
     let raw_name = &header[..100];
     let nul_pos = raw_name
@@ -35,8 +49,9 @@ fn parse_header<'a>(archive: &'a [u8], offset: usize) -> Option<TarHeader<'a>> {
 
     Some(TarHeader {
         name,
-        start: offset + 512,
-        end: offset + 512 + size,
+        type_,
+        start,
+        end,
     })
 }
 

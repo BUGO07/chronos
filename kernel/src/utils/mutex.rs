@@ -9,11 +9,8 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-#[cfg(target_arch = "x86_64")]
-use crate::scheduler::{self, thread};
-
 pub struct Mutex<T> {
-    locked: AtomicBool,
+    lock: AtomicBool,
     data: UnsafeCell<T>,
 }
 
@@ -23,7 +20,7 @@ unsafe impl<T: Send> Sync for Mutex<T> {}
 impl<T> Mutex<T> {
     pub const fn new(data: T) -> Self {
         Self {
-            locked: AtomicBool::new(false),
+            lock: AtomicBool::new(false),
             data: UnsafeCell::new(data),
         }
     }
@@ -33,7 +30,7 @@ impl<T> Mutex<T> {
         let mut backoff = 0u32;
         loop {
             if self
-                .locked
+                .lock
                 .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
                 .is_ok()
             {
@@ -44,11 +41,11 @@ impl<T> Mutex<T> {
             }
 
             #[cfg(target_arch = "x86_64")]
-            if scheduler::is_initialized() {
+            if crate::scheduler::is_initialized() {
                 if backoff < 10 {
-                    thread::yld();
+                    crate::scheduler::thread::yield_();
                 } else {
-                    thread::sleep((1u64 << (backoff - 10)).min(1_000_000));
+                    crate::scheduler::thread::sleep((1u64 << (backoff - 10)).min(1_000_000));
                 }
                 backoff += 1;
             } else {
@@ -61,7 +58,7 @@ impl<T> Mutex<T> {
 
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
         if self
-            .locked
+            .lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
@@ -79,7 +76,7 @@ impl<T> Mutex<T> {
         let mut backoff = 0u32;
         loop {
             if self
-                .locked
+                .lock
                 .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
                 .is_ok()
             {
@@ -87,11 +84,11 @@ impl<T> Mutex<T> {
             }
 
             #[cfg(target_arch = "x86_64")]
-            if scheduler::is_initialized() {
+            if crate::scheduler::is_initialized() {
                 if backoff < 10 {
-                    thread::yld();
+                    crate::scheduler::thread::yield_();
                 } else {
-                    thread::sleep((1u64 << (backoff - 10)).min(1_000_000));
+                    crate::scheduler::thread::sleep((1u64 << (backoff - 10)).min(1_000_000));
                 }
                 backoff += 1;
             } else {
@@ -103,17 +100,17 @@ impl<T> Mutex<T> {
     }
 
     pub fn try_lock_no_guard(&self) -> bool {
-        self.locked
+        self.lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
     }
 
     pub unsafe fn force_unlock(&self) {
-        self.locked.store(false, Ordering::Release);
+        self.lock.store(false, Ordering::Release);
     }
 
     pub fn is_locked(&self) -> bool {
-        self.locked.load(Ordering::Relaxed)
+        self.lock.load(Ordering::Relaxed)
     }
 
     pub fn into_inner(self) -> T {
@@ -144,6 +141,6 @@ impl<'a, T> core::ops::DerefMut for MutexGuard<'a, T> {
 
 impl<'a, T> Drop for MutexGuard<'a, T> {
     fn drop(&mut self) {
-        self.mutex.locked.store(false, Ordering::Release);
+        self.mutex.lock.store(false, Ordering::Release);
     }
 }
