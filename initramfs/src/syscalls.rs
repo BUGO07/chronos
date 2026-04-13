@@ -1,89 +1,8 @@
-#![no_std]
-#![no_main]
-
-use core::{arch::asm, fmt::Write};
-
-#[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
-    println!("Hello from the test process!");
-    sleep_ms(1000);
-    println!("Goodbye from the test process!");
-    panic!("This is a test panic!");
-}
-
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    println!("{}", info);
-    sys_exit(1);
-}
-
-#[inline(always)]
-fn sys_exit(code: u64) -> ! {
-    syscall!(SyscallId::Exit, code);
-    sys_yield();
-    unsafe { core::hint::unreachable_unchecked() }
-}
-
-#[inline(always)]
-fn sys_sleep(ns: u64) {
-    syscall!(SyscallId::Nanosleep, ns);
-}
-
-#[inline(always)]
-fn sleep_us(us: u64) {
-    sys_sleep(us * 1_000);
-}
-
-#[inline(always)]
-fn sleep_ms(ms: u64) {
-    sys_sleep(ms * 1_000_000);
-}
-
-#[inline(always)]
-fn sys_yield() {
-    syscall!(SyscallId::SchedYield);
-}
-
-#[inline(always)]
-fn sys_write(fd: i32, buf: *const u8, count: usize) -> isize {
-    syscall!(SyscallId::Write, fd, buf, count) as isize
-}
-
-pub struct Writer;
-
-impl Write for Writer {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        sys_write(1, s.as_ptr(), s.len());
-        Ok(())
-    }
-}
-
-#[doc(hidden)]
-pub fn _print(args: ::core::fmt::Arguments) {
-    write!(Writer, "{args}").ok();
-}
-
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {
-        $crate::_print(format_args!($($arg)*))
-    };
-}
-
-#[macro_export]
-macro_rules! println {
-    () => ($crate::print!("\n"));
-    ($fmt:expr) => ($crate::print!(concat!($fmt, "\n")));
-    ($fmt:expr, $($arg:tt)*) => ($crate::print!(
-        concat!($fmt, "\n"), $($arg)*));
-}
-
-#[macro_export]
 macro_rules! syscall {
     ($id:expr) => {{
         let ret: u64;
         unsafe {
-            asm!(
+            ::core::arch::asm!(
                 "syscall",
                 in("rax") $id as u64,
                 lateout("rax") ret,
@@ -94,7 +13,7 @@ macro_rules! syscall {
     ($id:expr, $a0:expr) => {{
         let ret: u64;
         unsafe {
-            asm!(
+            ::core::arch::asm!(
                 "syscall",
                 in("rax") $id as u64,
                 in("rdi") $a0 as u64,
@@ -106,7 +25,7 @@ macro_rules! syscall {
     ($id:expr, $a0:expr, $a1:expr) => {{
         let ret: u64;
         unsafe {
-            asm!(
+            ::core::arch::asm!(
                 "syscall",
                 in("rax") $id as u64,
                 in("rdi") $a0 as u64,
@@ -119,7 +38,7 @@ macro_rules! syscall {
     ($id:expr, $a0:expr, $a1:expr, $a2:expr) => {{
         let ret: u64;
         unsafe {
-            asm!(
+            ::core::arch::asm!(
                 "syscall",
                 in("rax") $id as u64,
                 in("rdi") $a0 as u64,
@@ -133,7 +52,7 @@ macro_rules! syscall {
     ($id:expr, $a0:expr, $a1:expr, $a2:expr, $a3:expr) => {{
         let ret: u64;
         unsafe {
-            asm!(
+            ::core::arch::asm!(
                 "syscall",
                 in("rax") $id as u64,
                 in("rdi") $a0 as u64,
@@ -148,7 +67,7 @@ macro_rules! syscall {
     ($id:expr, $a0:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr) => {{
         let ret: u64;
         unsafe {
-            asm!(
+            ::core::arch::asm!(
                 "syscall",
                 in("rax") $id as u64,
                 in("rdi") $a0 as u64,
@@ -164,7 +83,7 @@ macro_rules! syscall {
     ($id:expr, $a0:expr, $a1:expr, $a2:expr, $a3:expr, $a4:expr, $a5:expr) => {{
         let ret: u64;
         unsafe {
-            asm!(
+            ::core::arch::asm!(
                 "syscall",
                 in("rax") $id as u64,
                 in("rdi") $a0 as u64,
@@ -178,6 +97,63 @@ macro_rules! syscall {
         }
         ret
     }};
+}
+
+#[inline(always)]
+pub fn sys_open(path: *const core::ffi::c_char, flags: i32, mode: i32) -> i32 {
+    syscall!(SyscallId::Open, path, flags, mode) as i32
+}
+
+#[inline(always)]
+pub fn sys_close(fd: i32) -> i32 {
+    syscall!(SyscallId::Close, fd) as i32
+}
+
+#[inline(always)]
+pub fn sys_read(fd: i32, buf: *mut u8, count: usize) -> isize {
+    syscall!(SyscallId::Read, fd, buf, count) as isize
+}
+
+#[inline(always)]
+pub fn sys_write(fd: i32, buf: *const u8, count: usize) -> isize {
+    syscall!(SyscallId::Write, fd, buf, count) as isize
+}
+
+#[inline(always)]
+pub fn sys_mkdir(path: *const core::ffi::c_char) -> i32 {
+    syscall!(SyscallId::Mkdir, path) as i32
+}
+
+#[inline(always)]
+pub fn sys_get_cwd(buf: *mut u8, count: usize) -> isize {
+    syscall!(SyscallId::Getcwd, buf, count) as isize
+}
+
+#[inline(always)]
+pub fn sys_exit(code: u64) -> ! {
+    syscall!(SyscallId::Exit, code);
+    sys_yield();
+    unsafe { core::hint::unreachable_unchecked() }
+}
+
+#[inline(always)]
+pub fn sys_sleep(ns: u64) {
+    syscall!(SyscallId::Nanosleep, ns);
+}
+
+#[inline(always)]
+pub fn sleep_us(us: u64) {
+    sys_sleep(us * 1_000);
+}
+
+#[inline(always)]
+pub fn sleep_ms(ms: u64) {
+    sys_sleep(ms * 1_000_000);
+}
+
+#[inline(always)]
+pub fn sys_yield() {
+    syscall!(SyscallId::SchedYield);
 }
 
 #[repr(u64)]

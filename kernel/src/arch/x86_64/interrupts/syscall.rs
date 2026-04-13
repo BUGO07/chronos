@@ -7,9 +7,11 @@ use alloc::boxed::Box;
 
 use crate::{
     arch::interrupts::StackFrame,
+    drivers::fs::{FileDescriptor, Path},
     info,
     memory::KERNEL_STACK_SIZE,
     print,
+    scheduler::current_process,
     utils::asm::regs::{rdmsr, wrmsr},
 };
 
@@ -464,13 +466,40 @@ fn sys_yield(_regs: &mut StackFrame) {
     crate::scheduler::thread::yield_();
 }
 
+fn sys_read(regs: &mut StackFrame) {
+    let fd = regs.rdi;
+    let buf = regs.rsi as *mut u8;
+    let count = regs.rdx;
+
+    let slice = unsafe { core::slice::from_raw_parts_mut(buf, count as usize) };
+
+    if fd < 3 {
+        // TODO:
+        regs.rax = -38i32 as _; // enosys
+        return;
+    }
+
+    let current = current_process().unwrap();
+    let mut lock = current.lock();
+    let Some(file) = lock.fds.get_mut(&(fd as i32)) else {
+        regs.rax = -9i32 as _; // bad file descriptor
+        return;
+    };
+    regs.rax = if let Some(size) = file.read(slice) {
+        size as _
+    } else {
+        -38i32 as _ // enosys
+    };
+}
+
 fn sys_write(regs: &mut StackFrame) {
     let fd = regs.rdi;
     let buf = regs.rsi as *const u8;
     let count = regs.rdx;
 
+    let slice = unsafe { core::slice::from_raw_parts(buf, count as usize) };
+
     if fd == 1 {
-        let slice = unsafe { core::slice::from_raw_parts(buf, count as usize) };
         if let Ok(s) = core::str::from_utf8(slice) {
             print!("{}", s);
         } else {
@@ -478,15 +507,124 @@ fn sys_write(regs: &mut StackFrame) {
         }
         regs.rax = count;
     } else {
-        unimplemented!()
+        let current = current_process().unwrap();
+        let mut lock = current.lock();
+        let Some(file) = lock.fds.get_mut(&(fd as i32)) else {
+            regs.rax = -9i32 as _; // bad file descriptor
+            return;
+        };
+        file.write(slice);
+    }
+}
+
+fn sys_open(regs: &mut StackFrame) {
+    let current = current_process().unwrap();
+    let mut lock = current.lock();
+    let fd = lock.next_fd.fetch_add(1, Ordering::SeqCst);
+    let Ok(path) = unsafe { core::ffi::CStr::from_ptr(regs.rdi as _) }.to_str() else {
+        regs.rax = -14i32 as _; // efault
+        return;
+    };
+    // TODO!
+    let Some(file) = crate::drivers::fs::get_vfs().resolve_path_mut(Path::new(path)) else {
+        regs.rax = -38i32 as _; // no such file or directory
+        return;
+    };
+    lock.fds.insert(fd, FileDescriptor::new(file));
+    regs.rax = fd as _;
+}
+
+fn sys_close(regs: &mut StackFrame) {
+    let current = current_process().unwrap();
+    let mut lock = current.lock();
+    let fd = regs.rdi as i32;
+    if lock.fds.remove(&fd).is_some() {
+        regs.rax = 0;
+    } else {
+        regs.rax = -9i32 as _; // bad file descriptor
+    }
+}
+
+fn sys_lseek(regs: &mut StackFrame) {
+    const SEEK_SET: u64 = 0;
+    const SEEK_CUR: u64 = 1;
+    const SEEK_END: u64 = 2;
+    let current = current_process().unwrap();
+    let mut lock = current.lock();
+    let fd = regs.rdi as i32;
+    let offset = regs.rsi as i64;
+    let whence = regs.rdx;
+
+    let Some(file) = lock.fds.get_mut(&fd) else {
+        regs.rax = -9i32 as _; // bad file descriptor
+        return;
+    };
+
+    let new_pos = match whence {
+        SEEK_SET => offset,
+        SEEK_CUR => file.offset as i64 + offset,
+        SEEK_END => file.node.size() as i64 + offset,
+        _ => {
+            regs.rax = -22i32 as _; // invalid argument
+            return;
+        }
+    };
+
+    if new_pos < 0 {
+        regs.rax = -22i32 as _; // invalid argument
+    }
+}
+
+pub fn sys_get_cwd(regs: &mut StackFrame) {
+    let buf = regs.rdi as *mut u8;
+    let count = regs.rsi;
+
+    let slice = unsafe { core::slice::from_raw_parts_mut(buf, count as usize) };
+    let current = current_process().unwrap();
+    let lock = current.lock();
+    let cwd = lock.get_cwd().as_str().as_bytes();
+
+    if slice.len() < cwd.len() {
+        regs.rax = -34i32 as _; // ERANGE
+        return;
+    }
+
+    slice[..cwd.len()].copy_from_slice(cwd);
+    regs.rax = cwd.len() as _;
+}
+
+pub fn sys_mkdir(regs: &mut StackFrame) {
+    let path = regs.rdi as *const core::ffi::c_char;
+    let Ok(path) = unsafe { core::ffi::CStr::from_ptr(path) }.to_str() else {
+        regs.rax = -14i32 as _; // efault
+        return;
+    };
+
+    let path = Path::new(path);
+
+    if let Some(node) = crate::drivers::fs::get_vfs().resolve_path_mut(path.get_parent()) {
+        if node.create_dir(path.get_name()).is_some() {
+            regs.rax = 0;
+        } else {
+            regs.rax = -38i32 as _; // enosys
+        }
+    } else {
+        regs.rax = -38i32 as _; // enosys
     }
 }
 
 pub fn init() {
-    HANDLERS[SyscallId::Exit as usize].store(sys_exit as _, Ordering::Release);
-    HANDLERS[SyscallId::Nanosleep as usize].store(sys_nanosleep as _, Ordering::Release);
-    HANDLERS[SyscallId::SchedYield as usize].store(sys_yield as _, Ordering::Release);
+    HANDLERS[SyscallId::Read as usize].store(sys_read as _, Ordering::Release);
     HANDLERS[SyscallId::Write as usize].store(sys_write as _, Ordering::Release);
+    HANDLERS[SyscallId::Open as usize].store(sys_open as _, Ordering::Release);
+    HANDLERS[SyscallId::Close as usize].store(sys_close as _, Ordering::Release);
+    HANDLERS[SyscallId::Lseek as usize].store(sys_lseek as _, Ordering::Release);
+    HANDLERS[SyscallId::Getcwd as usize].store(sys_get_cwd as _, Ordering::Release);
+    HANDLERS[SyscallId::Mkdir as usize].store(sys_mkdir as _, Ordering::Release);
+    HANDLERS[SyscallId::SchedYield as usize].store(sys_yield as _, Ordering::Release);
+    HANDLERS[SyscallId::Nanosleep as usize].store(sys_nanosleep as _, Ordering::Release);
+    HANDLERS[SyscallId::Exit as usize].store(sys_exit as _, Ordering::Release);
+
     // IA32_EFER syscall
     wrmsr(0xC0000080, rdmsr(0xC0000080) | (1 << 0));
     // IA32_STAR

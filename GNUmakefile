@@ -43,6 +43,7 @@ run-bios: $(IMAGE_NAME).iso
 		$(QEMUFLAGS)
 
 initramfs.tar:
+	rm -rf initramfs/target
 	tar --format=ustar -cf $@ -C initramfs ./
 
 ovmf/OVMF_x86_64.fd:
@@ -90,12 +91,12 @@ testelf:
 	@if [ -z "$(TESTELF_SRC)" ]; then \
 		echo "usage: make testelf <path/to/file.rs>"; exit 1; \
 	fi
-	mkdir -p $(dir $(abspath $(TESTELF_SRC)))/bin
+	mkdir -p $(dir $(abspath $(TESTELF_SRC)))/../bin
 	rustc --edition 2024 --target x86_64-unknown-none \
 		-C opt-level=3 -C panic=abort -C relocation-model=static \
 		-C link-arg=-Ttext=0x400000 -C link-arg=--build-id=none \
 		-C strip=symbols \
-		-o $(dir $(abspath $(TESTELF_SRC)))/bin/$(notdir $(TESTELF_SRC:.rs=.elf)) $(TESTELF_SRC)
+		-o $(dir $(abspath $(TESTELF_SRC)))/../bin/$(notdir $(TESTELF_SRC:.rs=.elf)) $(TESTELF_SRC)
 
 .PHONY: clean
 clean:

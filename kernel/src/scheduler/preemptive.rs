@@ -6,14 +6,19 @@
 use core::{
     alloc::Layout,
     cell::OnceCell,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicI32, AtomicU64, Ordering},
 };
 
 use crate::{
+    drivers::fs::FileDescriptor,
     memory::{KERNEL_STACK_SIZE, USER_STACK_SIZE},
     utils::{asm::without_ints, spinlock::Spin},
 };
-use alloc::{collections::vec_deque::VecDeque, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{btree_map::BTreeMap, vec_deque::VecDeque},
+    sync::Arc,
+    vec::Vec,
+};
 
 use crate::{
     arch::{drivers::time::preferred_timer_ns, interrupts::StackFrame, system::lapic},
@@ -56,9 +61,14 @@ pub struct Process {
     next_tid: AtomicU64,
     next_stack_addr: u64,
     cwd: fs::Path,
+    pub fds: BTreeMap<i32, FileDescriptor<'static>>,
+    pub next_fd: AtomicI32,
     pub pagemap: &'static Arc<Spin<Pagemap>>,
     children: Vec<Arc<Spin<Thread>>>,
 }
+
+unsafe impl Send for Process {}
+unsafe impl Sync for Process {}
 
 impl Process {
     pub fn new(pagemap: &'static Arc<Spin<Pagemap>>, name: &'static str) -> Self {
@@ -69,6 +79,8 @@ impl Process {
             next_tid: AtomicU64::new(1),
             next_stack_addr: 0x0000_7FFF_FF00_0000,
             cwd: fs::Path::new("/"),
+            fds: BTreeMap::new(),
+            next_fd: AtomicI32::new(3), // 0, 1, 2 are reserved for stdin, stdout, stderr
             pagemap,
             children: Vec::new(),
         }

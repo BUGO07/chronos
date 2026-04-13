@@ -164,7 +164,7 @@ pub fn main_thread() -> ! {
 
     if let Some(bin) = get_vfs()
         .get_root()
-        .resolve_path(Path::new("/bin/test.elf"))
+        .resolve_path(Path::new("/bin/main.elf"))
         && let Some(elf_data) = bin.read()
     {
         let elf_proc_pid = scheduler::spawn_process(

@@ -54,6 +54,27 @@ fn canonicalize_components(path: &Path) -> Option<Vec<&str>> {
     Some(out)
 }
 
+pub struct FileDescriptor<'a> {
+    pub node: &'a mut dyn VfsNode,
+    pub offset: u64,
+}
+
+impl<'a> FileDescriptor<'a> {
+    pub fn new(node: &'a mut dyn VfsNode) -> FileDescriptor<'a> {
+        FileDescriptor { node, offset: 0 }
+    }
+    pub fn read(&mut self, buf: &mut [u8]) -> Option<usize> {
+        self.node.read_at(self.offset, buf).inspect(|&n| {
+            self.offset += n as u64;
+        })
+    }
+    pub fn write(&mut self, buf: &[u8]) -> Option<usize> {
+        self.node.write_at(self.offset, buf).inspect(|&n| {
+            self.offset += n as u64;
+        })
+    }
+}
+
 pub trait VfsNode: core::fmt::Debug {
     fn get_permissions(&self) -> &Permissions;
     fn get_permissions_mut(&mut self) -> &mut Permissions;
