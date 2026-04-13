@@ -21,7 +21,7 @@ use alloc::{
 };
 
 use crate::{
-    arch::{drivers::time::preferred_timer_ns, interrupts::StackFrame, system::lapic},
+    arch::{drivers::time::preferred_timer_ns, system::cpu::Registers, system::lapic},
     drivers::fs,
     memory::vmm::{PAGEMAP, Pagemap},
     utils::asm::halt_loop,
@@ -61,14 +61,13 @@ pub struct Process {
     next_tid: AtomicU64,
     next_stack_addr: u64,
     cwd: fs::Path,
-    pub fds: BTreeMap<i32, FileDescriptor<'static>>,
+    pub fds: BTreeMap<i32, FileDescriptor>,
     pub next_fd: AtomicI32,
     pub pagemap: &'static Arc<Spin<Pagemap>>,
     children: Vec<Arc<Spin<Thread>>>,
 }
 
 unsafe impl Send for Process {}
-unsafe impl Sync for Process {}
 
 impl Process {
     pub fn new(pagemap: &'static Arc<Spin<Pagemap>>, name: &'static str) -> Self {
@@ -124,7 +123,7 @@ impl Process {
     }
 }
 
-pub fn schedule(regs: &mut StackFrame) {
+pub fn schedule(regs: &mut Registers) {
     let time = preferred_timer_ns();
     let scheduler = get_scheduler();
 

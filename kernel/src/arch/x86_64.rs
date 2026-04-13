@@ -30,7 +30,6 @@ use crate::{
 
 pub mod drivers;
 pub mod gdt;
-pub mod interrupts;
 pub mod system;
 
 pub static CPU_FREQ: AtomicU64 = AtomicU64::new(0);
@@ -49,9 +48,6 @@ pub fn _start() -> ! {
 
     crate::memory::init();
     self::system::cpu::init_bsp();
-    self::gdt::init();
-    self::interrupts::init();
-    self::interrupts::pic::init();
 
     crate::utils::asm::toggle_ints(true);
 
@@ -162,35 +158,36 @@ pub fn main_thread() -> ! {
     // scheduler::thread::spawn(&pid0, keyboard_thread as _, "keyboard", false);
     // scheduler::thread::spawn(pid0, serial_thread as _, "serial", false);
 
-    if let Some(bin) = get_vfs()
-        .get_root()
-        .resolve_path(Path::new("/bin/main.elf"))
-        && let Some(elf_data) = bin.read()
     {
-        let elf_proc_pid = scheduler::spawn_process(
-            unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
-            "test_elf",
-        );
-        let elf_proc = scheduler::get_proc_by_pid(elf_proc_pid).unwrap();
-        let entry = {
-            let pagemap_ref = unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() };
-            let mut pagemap = pagemap_ref.lock();
-            match crate::utils::elf::load_elf(elf_data, &mut pagemap) {
-                Ok(elf_info) => {
-                    info!("loaded ELF binary, entry=0x{:X}", elf_info.entry);
-                    elf_info.entry as usize
+        let vfs = get_vfs();
+        if let Some(bin) = vfs.resolve_path(Path::new("/bin/initramfs.elf"))
+            && let Some(elf_data) = bin.read()
+        {
+            let elf_proc_pid = scheduler::spawn_process(
+                unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
+                "test_elf",
+            );
+            let elf_proc = scheduler::get_proc_by_pid(elf_proc_pid).unwrap();
+            let entry = {
+                let pagemap_ref = unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() };
+                let mut pagemap = pagemap_ref.lock();
+                match crate::utils::elf::load_elf(elf_data, &mut pagemap) {
+                    Ok(elf_info) => {
+                        info!("loaded ELF binary, entry=0x{:X}", elf_info.entry);
+                        elf_info.entry as usize
+                    }
+                    Err(e) => {
+                        error!("failed to load ELF: {}", e);
+                        0
+                    }
                 }
-                Err(e) => {
-                    error!("failed to load ELF: {}", e);
-                    0
-                }
+            };
+            if entry != 0 {
+                scheduler::thread::spawn(&elf_proc, entry as _, "main", true);
             }
-        };
-        if entry != 0 {
-            scheduler::thread::spawn(&elf_proc, entry as _, "main", true);
+        } else {
+            warn!("no bin directory found in root fs");
         }
-    } else {
-        warn!("no bin directory found in root fs");
     }
 
     // let shell_pid = scheduler::spawn_process(
@@ -201,7 +198,7 @@ pub fn main_thread() -> ! {
     // scheduler::thread::spawn(&shell_proc, shell_thread as _, "main", false);
 
     // unmask keyboard
-    crate::arch::interrupts::pic::unmask(1);
+    self::system::pic::unmask(1);
     let mut shell = Shell::new();
     let mut visible = true;
     let mut last_blink = preferred_timer_ms();

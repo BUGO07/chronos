@@ -536,9 +536,9 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
         UACPI_INTERRUPT_IRQ.store(irq as u8, Ordering::SeqCst);
 
         #[cfg(target_arch = "x86_64")]
-        crate::arch::interrupts::install_interrupt(vector, handle_uacpi_interrupt);
+        crate::arch::system::interrupts::install_interrupt(vector, handle_uacpi_interrupt);
         #[cfg(target_arch = "x86_64")]
-        crate::arch::interrupts::pic::unmask(irq as u8);
+        crate::arch::system::pic::unmask(irq as u8);
 
         *(out_irq_handle as *mut usize) = vector as usize;
         UACPI_STATUS_OK
@@ -546,7 +546,7 @@ extern "C" fn uacpi_kernel_install_interrupt_handler(
 }
 
 #[cfg(target_arch = "x86_64")]
-fn handle_uacpi_interrupt(_stack_frame: &mut crate::arch::interrupts::StackFrame) {
+fn handle_uacpi_interrupt(_stack_frame: &mut crate::arch::system::cpu::Registers) {
     let irq = UACPI_INTERRUPT_IRQ.load(Ordering::SeqCst);
     let handler_ptr = UACPI_INTERRUPT_HANDLER_PTR.load(Ordering::SeqCst);
     let ctx = UACPI_INTERRUPT_CTX.load(Ordering::SeqCst);
@@ -557,7 +557,7 @@ fn handle_uacpi_interrupt(_stack_frame: &mut crate::arch::interrupts::StackFrame
                 core::mem::transmute(handler_ptr);
             handler(ctx);
             #[cfg(target_arch = "x86_64")]
-            crate::arch::interrupts::pic::send_eoi(irq);
+            crate::arch::system::pic::send_eoi(irq);
         }
     }
 }
@@ -570,9 +570,9 @@ extern "C" fn uacpi_kernel_uninstall_interrupt_handler(
     let _vector = irq_handle as u8;
 
     #[cfg(target_arch = "x86_64")]
-    crate::arch::interrupts::clear_interrupt(_vector);
+    crate::arch::system::interrupts::clear_interrupt(_vector);
     #[cfg(target_arch = "x86_64")]
-    crate::arch::interrupts::pic::mask(_vector);
+    crate::arch::system::pic::mask(_vector);
 
     UACPI_INTERRUPT_HANDLER_PTR.store(null_mut(), Ordering::SeqCst);
     UACPI_INTERRUPT_CTX.store(null_mut(), Ordering::SeqCst);

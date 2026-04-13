@@ -4,7 +4,7 @@
 */
 
 use crate::{
-    arch::interrupts::StackFrame,
+    arch::system::cpu::Registers,
     error, info,
     utils::asm::port::{inb, outb},
 };
@@ -62,18 +62,18 @@ pub fn init() {
 
         flush_data_port();
 
-        crate::arch::interrupts::install_interrupt(0x2c, mouse_interrupt_handler);
-        crate::arch::interrupts::pic::unmask(12);
+        crate::arch::system::interrupts::install_interrupt(0x2c, mouse_interrupt_handler);
+        crate::arch::system::pic::unmask(12);
         info!("done...");
     });
 }
 
-pub fn mouse_interrupt_handler(_stack_frame: &mut StackFrame) {
+pub fn mouse_interrupt_handler(_stack_frame: &mut Registers) {
     unsafe {
         let status = inb(STATUS_PORT);
 
         if (status & 0x20) == 0 {
-            crate::arch::interrupts::pic::send_eoi(12);
+            crate::arch::system::pic::send_eoi(12);
             return;
         }
 
@@ -81,7 +81,7 @@ pub fn mouse_interrupt_handler(_stack_frame: &mut StackFrame) {
 
         if PACKET_INDEX == 0 && (byte & 0x08) == 0 {
             PACKET_INDEX = 0;
-            crate::arch::interrupts::pic::send_eoi(12);
+            crate::arch::system::pic::send_eoi(12);
             return;
         }
 
@@ -102,7 +102,7 @@ pub fn mouse_interrupt_handler(_stack_frame: &mut StackFrame) {
             MOUSE.x = ((MOUSE.x as i32 + dx as i32).clamp(0, u16::MAX as i32)) as u16;
             MOUSE.y = ((MOUSE.y as i32 - dy as i32).clamp(0, u16::MAX as i32)) as u16;
         }
-        crate::arch::interrupts::pic::send_eoi(12);
+        crate::arch::system::pic::send_eoi(12);
     }
 }
 

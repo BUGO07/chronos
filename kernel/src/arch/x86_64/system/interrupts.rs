@@ -3,42 +3,14 @@
     Released under EUPL 1.2 License
 */
 
+core::arch::global_asm!(include_str!("isr.S"));
+
 use core::{
     arch::asm,
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use crate::debug;
-
-pub mod pic;
-pub mod syscall;
-
-#[repr(C)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, PartialOrd)]
-pub struct StackFrame {
-    pub r15: u64,
-    pub r14: u64,
-    pub r13: u64,
-    pub r12: u64,
-    pub r11: u64,
-    pub r10: u64,
-    pub r9: u64,
-    pub r8: u64,
-    pub rbp: u64,
-    pub rdi: u64,
-    pub rsi: u64,
-    pub rdx: u64,
-    pub rcx: u64,
-    pub rbx: u64,
-    pub rax: u64,
-    pub vector: u64,
-    pub error_code: u64,
-    pub rip: u64,
-    pub cs: u64,
-    pub rflags: u64,
-    pub rsp: u64,
-    pub ss: u64,
-}
+use crate::{arch::system::cpu::Registers, debug};
 
 #[repr(C, packed)]
 pub struct IdtPtr {
@@ -86,82 +58,6 @@ impl IdtEntry {
     }
 }
 
-core::arch::global_asm! {
-    r#"
-.extern isr_handler
-isr_common_stub:
-    cld
-
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    push rbp
-    push r8
-    push r9
-    push r10
-    push r11
-    push r12
-    push r13
-    push r14
-    push r15
-
-    mov rdi, rsp
-    call isr_handler
-
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop r11
-    pop r10
-    pop r9
-    pop r8
-    pop rbp
-    pop rdi
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-
-    add rsp, 16
-
-    iretq
-
-.macro isr number
-    isr_\number:
-.if !(\number == 8 || (\number >= 10 && \number <= 14) || \number == 17 || \number == 21 || \number == 29 || \number == 30)
-    push 0
-.endif
-    push \number
-    jmp isr_common_stub
-.endm
-
-.altmacro
-.macro isr_insert number
-    .section .text
-    isr \number
-
-    .section .data
-    .quad isr_\number
-.endm
-
-.section .data
-.byte 1
-.align 8
-isr_table:
-.set i, 0
-.rept 256
-    isr_insert %i
-    .set i, i + 1
-.endr
-.global isr_table
-    "#
-}
-
 static HANDLERS: [AtomicPtr<()>; 256] = [const { AtomicPtr::new(core::ptr::null_mut()) }; 256];
 static mut IDT: [IdtEntry; 256] = [IdtEntry::new(); 256];
 static mut IDTR: IdtPtr = IdtPtr {
@@ -205,7 +101,7 @@ const EXCEPTION_NAMES: [&str; 32] = [
 ];
 
 #[unsafe(no_mangle)]
-extern "C" fn isr_handler(regs: &mut StackFrame) {
+extern "C" fn isr_handler(regs: &mut Registers) {
     if regs.vector < 32 {
         match regs.vector {
             1..=3 => {
@@ -225,13 +121,13 @@ extern "C" fn isr_handler(regs: &mut StackFrame) {
     }
 
     if regs.vector == 0x80 {
-        syscall::syscall_handler(regs);
+        super::syscall::syscall_handler(regs);
         return;
     }
 
     let handler_ptr = HANDLERS[regs.vector as usize].load(Ordering::Acquire);
     if !handler_ptr.is_null() {
-        let handler: fn(&mut StackFrame) = unsafe { core::mem::transmute(handler_ptr) };
+        let handler: fn(&mut Registers) = unsafe { core::mem::transmute(handler_ptr) };
         handler(regs);
     }
 }
@@ -266,11 +162,9 @@ pub fn init() {
         0x21,
         crate::arch::drivers::keyboard::keyboard_interrupt_handler,
     );
-
-    syscall::init();
 }
 
-pub fn install_interrupt(vector: u8, func: fn(&mut StackFrame)) {
+pub fn install_interrupt(vector: u8, func: fn(&mut Registers)) {
     HANDLERS[vector as usize].store(func as _, Ordering::Release);
 }
 

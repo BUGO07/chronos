@@ -3,51 +3,69 @@
     Released under EUPL 1.2 License
 */
 
+use core::mem::ManuallyDrop;
+
+use crate::utils::{
+    asm::{int_status, toggle_ints},
+    spinlock::SpinGuard,
+};
+
 use super::*;
 
-pub fn get_root() -> &'static dyn VfsNode {
-    get_vfs().get_root()
+pub struct VfsGuard {
+    guard: ManuallyDrop<SpinGuard<'static, Vfs>>,
+    int_status: bool,
 }
 
-pub fn get_root_mut() -> &'static mut Box<dyn VfsNode> {
-    get_vfs().get_root_mut()
+impl core::ops::Deref for VfsGuard {
+    type Target = Vfs;
+    fn deref(&self) -> &Vfs {
+        &self.guard
+    }
 }
 
-pub fn get_vfs() -> &'static mut Vfs {
-    unsafe { VFS.get_mut().unwrap() }
+impl core::ops::DerefMut for VfsGuard {
+    fn deref_mut(&mut self) -> &mut Vfs {
+        &mut self.guard
+    }
 }
 
-pub fn ls(path: Path) -> Vec<&'static str> {
+impl Drop for VfsGuard {
+    fn drop(&mut self) {
+        unsafe { ManuallyDrop::drop(&mut self.guard) };
+        if self.int_status {
+            toggle_ints(true);
+        }
+    }
+}
+
+pub fn get_vfs() -> VfsGuard {
+    let ints_were_enabled = int_status();
+    if ints_were_enabled {
+        toggle_ints(false);
+    }
+    let guard = VFS.lock();
+    VfsGuard {
+        guard: ManuallyDrop::new(guard),
+        int_status: ints_were_enabled,
+    }
+}
+
+pub fn ls(path: Path) -> Vec<alloc::string::String> {
     get_vfs()
         .resolve_path(path)
         .unwrap()
         .get_children()
         .iter()
-        .map(|node| node.get_name())
+        .map(|node| alloc::string::String::from(node.get_name()))
         .collect()
 }
 
-pub fn cat(path: Path) -> Option<&'static str> {
+pub fn cat(path: Path) -> Option<alloc::string::String> {
     get_vfs()
         .resolve_path(path)?
         .read()
-        .map(|data| str::from_utf8(data).unwrap())
-}
-
-pub fn mkfile(path: Path, name: &str) {
-    get_vfs()
-        .resolve_path_mut(path)
-        .unwrap()
-        .create_file(name)
-        .unwrap();
-}
-
-pub fn mkdir(path: Path, name: &str) {
-    get_vfs()
-        .resolve_path_mut(path)
-        .unwrap()
-        .create_dir(name)
-        .unwrap();
+        .map(|data| alloc::string::String::from(str::from_utf8(data).unwrap()))
 }
 
 pub fn rm(path: Path, name: &str) {

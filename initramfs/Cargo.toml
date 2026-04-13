@@ -1,5 +1,12 @@
 [package]
-name = "testrs"
+name = "initramfs"
 version = "0.1.0"
 authors = ["bugo07"]
 edition = "2024"
+
+[profile.release]
+opt-level = 3
+panic = "abort"
+strip = "symbols"
+
+[dependencies]

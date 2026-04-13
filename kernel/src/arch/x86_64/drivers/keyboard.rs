@@ -8,7 +8,7 @@ use core::cell::UnsafeCell;
 use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 use pc_keyboard::{HandleControl, KeyCode, Keyboard, ScancodeSet1, layouts::Us104Key};
 
-use crate::{arch::interrupts::StackFrame, utils::asm::port::inb};
+use crate::{arch::system::cpu::Registers, utils::asm::port::inb};
 
 pub static mut KEYBOARD_STATE: UnsafeCell<KeyboardState> = UnsafeCell::new(KeyboardState {
     keyboard: Keyboard::new(ScancodeSet1::new(), Us104Key, HandleControl::Ignore),
@@ -22,7 +22,7 @@ pub struct KeyboardState {
     pub keys_down: Vec<KeyCode>,
 }
 
-pub fn keyboard_interrupt_handler(_stack_frame: &mut StackFrame) {
+pub fn keyboard_interrupt_handler(_stack_frame: &mut Registers) {
     unsafe { KEYBOARD_STATE.get_mut().scancodes.push_back(inb(0x60)) };
-    crate::arch::interrupts::pic::send_eoi(1);
+    crate::arch::system::pic::send_eoi(1);
 }

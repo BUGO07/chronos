@@ -3,8 +3,6 @@
     Released under EUPL 1.2 License
 */
 
-use core::cell::OnceCell;
-
 use alloc::{
     boxed::Box,
     format,
@@ -12,32 +10,34 @@ use alloc::{
     vec::Vec,
 };
 
-use crate::{debug, info};
+use crate::{arch::drivers::time::rtc::read_rtc, debug, info, utils::spinlock::Spin};
 
 pub use types::*;
 pub mod helpers;
 pub mod types;
 pub use helpers::*;
 
-pub static mut VFS: OnceCell<Vfs> = OnceCell::new();
+pub static VFS: Spin<Vfs> = Spin::new(Vfs { root: None });
 
 impl Vfs {
     pub fn new(root: Box<dyn VfsNode>) -> Self {
-        Self { root }
+        Self { root: Some(root) }
     }
     pub fn get_root(&self) -> &dyn VfsNode {
-        self.root.as_ref()
+        self.root.as_ref().unwrap().as_ref()
     }
     pub fn get_root_mut(&mut self) -> &mut Box<dyn VfsNode> {
-        &mut self.root
+        self.root.as_mut().unwrap()
     }
     pub fn resolve_path(&self, path: Path) -> Option<&dyn VfsNode> {
-        self.root.resolve_path(path)
+        self.root.as_ref().unwrap().resolve_path(path)
     }
     pub fn resolve_path_mut(&mut self, path: Path) -> Option<&mut dyn VfsNode> {
-        self.root.resolve_path_mut(path)
+        self.root.as_mut().unwrap().resolve_path_mut(path)
     }
 }
+
+unsafe impl Send for Vfs {}
 
 fn canonicalize_components(path: &Path) -> Option<Vec<&str>> {
     let mut out: Vec<&str> = Vec::new();
@@ -54,30 +54,54 @@ fn canonicalize_components(path: &Path) -> Option<Vec<&str>> {
     Some(out)
 }
 
-pub struct FileDescriptor<'a> {
-    pub node: &'a mut dyn VfsNode,
+pub struct FileDescriptor {
+    node: *mut dyn VfsNode,
+    pub permissions: Permissions,
     pub offset: u64,
+    pub append: bool,
 }
 
-impl<'a> FileDescriptor<'a> {
-    pub fn new(node: &'a mut dyn VfsNode) -> FileDescriptor<'a> {
-        FileDescriptor { node, offset: 0 }
+impl FileDescriptor {
+    pub fn new(node: &mut dyn VfsNode, permissions: Permissions) -> FileDescriptor {
+        FileDescriptor {
+            node: unsafe { core::mem::transmute(node) },
+            permissions,
+            offset: 0,
+            append: false,
+        }
+    }
+    pub fn with_append(mut self, append: bool) -> Self {
+        self.append = append;
+        self
+    }
+    pub fn node(&self) -> &dyn VfsNode {
+        unsafe { &*self.node }
+    }
+    pub fn node_mut(&mut self) -> &mut dyn VfsNode {
+        unsafe { &mut *self.node }
     }
     pub fn read(&mut self, buf: &mut [u8]) -> Option<usize> {
-        self.node.read_at(self.offset, buf).inspect(|&n| {
+        let offset = self.offset;
+        self.node_mut().read_at(offset, buf).inspect(|&n| {
             self.offset += n as u64;
         })
     }
     pub fn write(&mut self, buf: &[u8]) -> Option<usize> {
-        self.node.write_at(self.offset, buf).inspect(|&n| {
-            self.offset += n as u64;
+        let write_offset = if self.append {
+            self.node().size()
+        } else {
+            self.offset
+        };
+
+        self.node_mut().write_at(write_offset, buf).inspect(|&n| {
+            self.offset = write_offset + n as u64;
         })
     }
 }
 
 pub trait VfsNode: core::fmt::Debug {
-    fn get_permissions(&self) -> &Permissions;
-    fn get_permissions_mut(&mut self) -> &mut Permissions;
+    fn get_permissions(&self) -> &NodeMode;
+    fn get_permissions_mut(&mut self) -> &mut NodeMode;
     fn get_metadata(&self) -> &VfsNodeMetadata;
     fn get_metadata_mut(&mut self) -> &mut VfsNodeMetadata;
     fn get_type(&self) -> &VfsNodeType;
@@ -115,11 +139,64 @@ pub trait VfsNode: core::fmt::Debug {
     }
 }
 
+pub trait VfsNodeMetadataExt {
+    fn with_permissions(self, permissions: NodeMode) -> Self;
+    fn with_size(self, size: u64) -> Self;
+    fn with_created_at(self, created_at: u64) -> Self;
+    fn with_modified_at(self, modified_at: u64) -> Self;
+}
+
+impl VfsNodeMetadataExt for Option<&mut Box<dyn VfsNode>> {
+    fn with_permissions(mut self, permissions: NodeMode) -> Self {
+        if let Some(x) = self.as_mut() {
+            x.get_metadata_mut().permissions = permissions;
+        }
+        self
+    }
+    fn with_size(mut self, size: u64) -> Self {
+        if let Some(x) = self.as_mut() {
+            x.get_metadata_mut().size = size;
+        }
+        self
+    }
+    fn with_created_at(mut self, created_at: u64) -> Self {
+        if let Some(x) = self.as_mut() {
+            x.get_metadata_mut().created_at = created_at;
+        }
+        self
+    }
+    fn with_modified_at(mut self, modified_at: u64) -> Self {
+        if let Some(x) = self.as_mut() {
+            x.get_metadata_mut().modified_at = modified_at;
+        }
+        self
+    }
+}
+
+impl VfsNodeMetadataExt for &mut Box<dyn VfsNode> {
+    fn with_permissions(self, permissions: NodeMode) -> Self {
+        self.get_metadata_mut().permissions = permissions;
+        self
+    }
+    fn with_size(self, size: u64) -> Self {
+        self.get_metadata_mut().size = size;
+        self
+    }
+    fn with_created_at(self, created_at: u64) -> Self {
+        self.get_metadata_mut().created_at = created_at;
+        self
+    }
+    fn with_modified_at(self, modified_at: u64) -> Self {
+        self.get_metadata_mut().modified_at = modified_at;
+        self
+    }
+}
+
 impl VfsNode for Directory {
-    fn get_permissions(&self) -> &Permissions {
+    fn get_permissions(&self) -> &NodeMode {
         &self.get_metadata().permissions
     }
-    fn get_permissions_mut(&mut self) -> &mut Permissions {
+    fn get_permissions_mut(&mut self) -> &mut NodeMode {
         &mut self.get_metadata_mut().permissions
     }
     fn get_metadata(&self) -> &VfsNodeMetadata {
@@ -170,6 +247,7 @@ impl VfsNode for Directory {
         if self.children.iter().any(|c| c.get_name() == name) {
             return None;
         }
+        self.metadata.modified_at = read_rtc().to_epoch().unwrap_or_default();
         self.children
             .push(Box::new(Directory::new(self.path.join(name))));
         self.children.last_mut()
@@ -178,6 +256,7 @@ impl VfsNode for Directory {
         if self.children.iter().any(|c| c.get_name() == name) {
             return None;
         }
+        self.metadata.modified_at = read_rtc().to_epoch().unwrap_or_default();
         self.children
             .push(Box::new(File::new(Vec::new(), self.path.join(name))));
         self.children.last_mut()
@@ -185,10 +264,14 @@ impl VfsNode for Directory {
     fn remove_child(&mut self, name: &str) -> bool {
         let before = self.children.len();
         self.children.retain(|c| c.get_name() != name);
-        self.children.len() != before
+        let removed = self.children.len() != before;
+        if removed {
+            self.metadata.modified_at = read_rtc().to_epoch().unwrap_or_default();
+        }
+        removed
     }
     fn size(&self) -> u64 {
-        0
+        self.metadata.size
     }
     fn read(&self) -> Option<&[u8]> {
         None
@@ -205,10 +288,10 @@ impl VfsNode for Directory {
 }
 
 impl VfsNode for File {
-    fn get_permissions(&self) -> &Permissions {
+    fn get_permissions(&self) -> &NodeMode {
         &self.get_metadata().permissions
     }
-    fn get_permissions_mut(&mut self) -> &mut Permissions {
+    fn get_permissions_mut(&mut self) -> &mut NodeMode {
         &mut self.get_metadata_mut().permissions
     }
     fn get_metadata(&self) -> &VfsNodeMetadata {
@@ -261,7 +344,7 @@ impl VfsNode for File {
         false
     }
     fn size(&self) -> u64 {
-        self.data.len() as u64
+        self.metadata.size
     }
     fn read(&self) -> Option<&[u8]> {
         Some(&self.data)
@@ -284,6 +367,7 @@ impl VfsNode for File {
         }
         self.data[offset..end].copy_from_slice(buf);
         self.metadata.size = self.data.len() as u64;
+        self.metadata.modified_at = read_rtc().to_epoch().unwrap_or_default();
         Some(buf.len())
     }
     fn truncate(&mut self, len: u64) -> bool {
@@ -294,6 +378,7 @@ impl VfsNode for File {
             self.data.resize(len, 0);
         }
         self.metadata.size = self.data.len() as u64;
+        self.metadata.modified_at = read_rtc().to_epoch().unwrap_or_default();
         true
     }
 }
@@ -375,7 +460,7 @@ pub fn init() {
         }
     }
 
-    unsafe { VFS.set(vfs).ok() };
+    *VFS.lock() = vfs;
 
     info!("done");
 }

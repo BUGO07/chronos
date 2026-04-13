@@ -3,22 +3,35 @@
     Released under EUPL 1.2 License
 */
 
+use crate::arch::drivers::time::rtc::read_rtc;
+
 use super::*;
 
-#[derive(Debug)]
-pub struct Permissions {
-    pub read: bool,
-    pub write: bool,
-    pub execute: bool,
-}
+bitflags::bitflags! {
+    #[derive(Debug)]
+    pub struct NodeMode: i32 {
+        const S_IRUSR = 0o400;
+        const S_IWUSR = 0o200;
+        const S_IXUSR = 0o100;
+        const S_IRGRP = 0o040;
+        const S_IWGRP = 0o020;
+        const S_IXGRP = 0o010;
+        const S_IROTH = 0o004;
+        const S_IWOTH = 0o002;
+        const S_IXOTH = 0o001;
+        const READ = Self::S_IRUSR.bits() | Self::S_IRGRP.bits() | Self::S_IROTH.bits();
+        const WRITE = Self::S_IWUSR.bits() | Self::S_IWGRP.bits() | Self::S_IWOTH.bits();
+        const EXECUTE = Self::S_IXUSR.bits() | Self::S_IXGRP.bits() | Self::S_IXOTH.bits();
+        const RW = Self::READ.bits() | Self::WRITE.bits();
+    }
 
-impl Permissions {
-    pub fn new(read: bool, write: bool, execute: bool) -> Self {
-        Self {
-            read,
-            write,
-            execute,
-        }
+    #[derive(PartialEq, Debug)]
+    pub struct Permissions: i32 {
+        const READ = 0b100;
+        const WRITE = 0b010;
+        const EXECUTE = 0b001;
+        const RW = Self::READ.bits() | Self::WRITE.bits();
+        const RWX = Self::READ.bits() | Self::WRITE.bits() | Self::EXECUTE.bits();
     }
 }
 
@@ -28,7 +41,7 @@ pub struct VfsNodeMetadata {
     pub created_at: u64,
     pub modified_at: u64,
     pub type_: VfsNodeType,
-    pub permissions: Permissions,
+    pub permissions: NodeMode,
 }
 
 impl VfsNodeMetadata {
@@ -38,11 +51,11 @@ impl VfsNodeMetadata {
             created_at: 0,
             modified_at: 0,
             type_,
-            permissions: Permissions::new(true, true, false),
+            permissions: NodeMode::RW,
         }
     }
 
-    pub fn with_permissions(mut self, permissions: Permissions) -> Self {
+    pub fn with_permissions(mut self, permissions: NodeMode) -> Self {
         self.permissions = permissions;
         self
     }
@@ -71,7 +84,7 @@ pub enum VfsNodeType {
 
 #[derive(Debug)]
 pub struct Vfs {
-    pub root: Box<dyn VfsNode>,
+    pub root: Option<Box<dyn VfsNode>>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,9 +125,12 @@ impl core::fmt::Debug for Directory {
 
 impl Directory {
     pub fn new(path: Path) -> Self {
+        let epoch = read_rtc().to_epoch().unwrap_or_default();
         Self {
             children: Vec::new(),
-            metadata: VfsNodeMetadata::new(VfsNodeType::Directory),
+            metadata: VfsNodeMetadata::new(VfsNodeType::Directory)
+                .with_created_at(epoch)
+                .with_modified_at(epoch),
             path,
         }
     }
@@ -129,9 +145,14 @@ pub struct File {
 
 impl File {
     pub fn new(data: Vec<u8>, path: Path) -> Self {
+        let epoch = read_rtc().to_epoch().unwrap_or_default();
+        let size = data.len() as u64;
         Self {
             data,
-            metadata: VfsNodeMetadata::new(VfsNodeType::File),
+            metadata: VfsNodeMetadata::new(VfsNodeType::File)
+                .with_created_at(epoch)
+                .with_modified_at(epoch)
+                .with_size(size),
             path,
         }
     }

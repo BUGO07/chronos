@@ -21,7 +21,7 @@ use crate::{
 use alloc::sync::{Arc, Weak};
 
 use crate::{
-    arch::{drivers::time::preferred_timer_ns, interrupts::StackFrame},
+    arch::{drivers::time::preferred_timer_ns, system::cpu::Registers},
     memory::KERNEL_STACK_SIZE,
     utils::asm::halt_loop,
 };
@@ -47,7 +47,7 @@ pub struct Thread {
     pub ustack: u64,
     pub kstack_alloc: u64,
     pub ustack_alloc: u64,
-    pub regs: StackFrame,
+    pub regs: Registers,
     parent: Weak<Spin<Process>>,
     status: Status,
     pub runtime: u64,
@@ -70,11 +70,6 @@ impl PartialEq for Thread {
         self.gtid == other.gtid
     }
 }
-
-impl Eq for Thread {}
-
-unsafe impl Sync for Thread {}
-unsafe impl Send for Thread {}
 
 impl Thread {
     pub fn new(proc: &Arc<Spin<Process>>, func: *const (), name: &'static str, user: bool) -> Self {
@@ -128,7 +123,7 @@ impl Thread {
             ustack,
             kstack_alloc,
             ustack_alloc,
-            regs: StackFrame {
+            regs: Registers {
                 #[cfg(target_arch = "x86_64")]
                 cs: if user { 0x28 | 0x03 } else { 0x08 },
                 #[cfg(target_arch = "x86_64")]

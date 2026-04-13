@@ -4,4 +4,7 @@
 */
 
 pub mod cpu;
+pub mod interrupts;
 pub mod lapic;
+pub mod pic;
+pub mod syscall;

@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "testrs"
+name = "initramfs"
 version = "0.1.0"

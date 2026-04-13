@@ -36,7 +36,6 @@ pub mod flag {
 pub static mut PAGEMAP: OnceCell<Arc<Spin<Pagemap>>> = OnceCell::new();
 
 unsafe impl Send for Pagemap {}
-unsafe impl Sync for Pagemap {}
 
 #[derive(Clone)]
 pub struct Pagemap {

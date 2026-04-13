@@ -8,7 +8,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use alloc::string::String;
 
 use crate::{
-    arch::interrupts::StackFrame,
+    arch::system::cpu::Registers,
     info,
     utils::{asm::port::outb, time::Timer},
 };
@@ -30,13 +30,13 @@ pub fn init() {
         |_: &Timer| ELAPSED_MS.load(Ordering::Relaxed) * 1_000_000,
         0,
     ));
-    crate::arch::interrupts::pic::unmask(0);
+    crate::arch::system::pic::unmask(0);
     info!("done");
 }
 
-pub fn timer_interrupt_handler(_stack_frame: &mut StackFrame) {
+pub fn timer_interrupt_handler(_stack_frame: &mut Registers) {
     pit_tick();
-    crate::arch::interrupts::pic::send_eoi(0);
+    crate::arch::system::pic::send_eoi(0);
 }
 
 pub fn elapsed_pretty(digits: u32) -> String {

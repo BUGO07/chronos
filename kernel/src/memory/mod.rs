@@ -17,14 +17,14 @@ pub const KERNEL_STACK_SIZE: usize = 64 * 1024;
 pub const USER_STACK_SIZE: usize = 64 * 1024;
 
 #[global_allocator]
-pub static ALLOCATOR: TalcLock<spin::Mutex<()>, Claim> = TalcLock::new(unsafe {
+static ALLOCATOR: TalcLock<spin::Mutex<()>, Claim> = TalcLock::new(unsafe {
     static mut INITIAL_HEAP: [u8; min_first_heap_size::<DefaultBinning>() + 128 * 1024] =
         [0; min_first_heap_size::<DefaultBinning>() + 128 * 1024];
 
     Claim::array(&raw mut INITIAL_HEAP)
 });
 
-pub static MEMORY_INIT_STAGE: AtomicU8 = AtomicU8::new(0);
+static MEMORY_INIT_STAGE: AtomicU8 = AtomicU8::new(0);
 static USABLE_MEMORY: AtomicU64 = AtomicU64::new(0);
 static RESERVED_MEMORY: AtomicU64 = AtomicU64::new(0);
 

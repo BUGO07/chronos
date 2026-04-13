@@ -6,3 +6,4 @@ int.txt
 chronos*
 **/target
 initramfs.tar
+initramfs/bin

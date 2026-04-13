@@ -4,7 +4,7 @@
 */
 
 use crate::{
-    arch::interrupts::StackFrame,
+    arch::system::cpu::Registers,
     debug, info,
     memory::vmm::{flag, page_size},
     utils::{
@@ -57,8 +57,8 @@ pub fn init() {
 
     fence(Ordering::SeqCst);
 
-    crate::arch::interrupts::install_interrupt(0xfe, lapic_oneshot_timer_handler);
-    crate::arch::interrupts::install_interrupt(0xff, lapic_spurious_handler);
+    crate::arch::system::interrupts::install_interrupt(0xfe, lapic_oneshot_timer_handler);
+    crate::arch::system::interrupts::install_interrupt(0xff, lapic_spurious_handler);
 
     mmio_write(reg::TPR, 0x00);
     mmio_write(reg::SIV, (1 << 8) | 0xFF);
@@ -68,12 +68,12 @@ pub fn init() {
     info!("done");
 }
 
-fn lapic_oneshot_timer_handler(stack_frame: &mut StackFrame) {
+fn lapic_oneshot_timer_handler(stack_frame: &mut Registers) {
     crate::scheduler::schedule(stack_frame);
     mmio_write(reg::EOI, 0);
 }
 
-fn lapic_spurious_handler(_stack_frame: &mut StackFrame) {
+fn lapic_spurious_handler(_stack_frame: &mut Registers) {
     // no eoi
 }
 

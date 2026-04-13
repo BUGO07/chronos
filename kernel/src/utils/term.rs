@@ -24,7 +24,6 @@ pub struct Writer {
 }
 
 unsafe impl Send for Writer {}
-unsafe impl Sync for Writer {}
 
 extern "C" fn malloc(size: usize) -> *mut core::ffi::c_void {
     unsafe { alloc::alloc::alloc(Layout::from_size_align(size, 0x10).unwrap()) as _ }
@@ -158,15 +157,14 @@ macro_rules! print_centered {
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
-    serial_print!("{}", args);
     if get_memory_init_stage() > 0 {
-        let closure = || {
+        crate::utils::asm::without_ints(|| {
             for writer in WRITERS.lock().iter_mut() {
                 writer.write_fmt(args).expect("Printing failed");
             }
-        };
-        crate::utils::asm::without_ints(closure);
+        });
     }
+    serial_print!("{}", args);
 }
 
 #[doc(hidden)]

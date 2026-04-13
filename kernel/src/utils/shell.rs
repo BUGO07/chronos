@@ -314,7 +314,8 @@ impl Shell {
                     } else {
                         cwd.join(args[0])
                     };
-                    if let Some(new_p) = fs::get_vfs().resolve_path(full_path) {
+                    let vfs = fs::get_vfs();
+                    if let Some(new_p) = vfs.resolve_path(full_path) {
                         new_p.get_path().clone()
                     } else {
                         println!("cd: {}: No such file or directory", p);
@@ -343,7 +344,8 @@ impl Shell {
                         cwd.join(args[0])
                     };
 
-                    if let Some(new_p) = fs::get_vfs().resolve_path(full_path) {
+                    let vfs = fs::get_vfs();
+                    if let Some(new_p) = vfs.resolve_path(full_path) {
                         new_p.get_path().clone()
                     } else {
                         println!("ls: {}: No such file or directory", p);
@@ -356,11 +358,13 @@ impl Shell {
                     .unwrap_or_else(|| vfs.resolve_path(cwd).unwrap())
                     .get_children()
                 {
+                    use crate::drivers::fs::NodeMode;
+
                     print!(
                         "{}{}{} ",
                         if child.is_dir() {
                             color::BLUE
-                        } else if child.get_permissions().execute {
+                        } else if child.get_permissions().contains(NodeMode::EXECUTE) {
                             color::GREEN
                         } else {
                             color::WHITE_BRIGHT
@@ -382,7 +386,7 @@ impl Shell {
                     .lock()
                     .get_cwd()
                     .clone();
-                let vfs = fs::get_vfs();
+                let mut vfs = fs::get_vfs();
                 let dir = vfs.resolve_path_mut(cwd).unwrap();
                 for arg in args {
                     if dir.create_dir(arg).is_none() {
@@ -401,7 +405,7 @@ impl Shell {
                     .lock()
                     .get_cwd()
                     .clone();
-                let vfs = fs::get_vfs();
+                let mut vfs = fs::get_vfs();
                 let dir = vfs.resolve_path_mut(cwd).unwrap();
                 for arg in args {
                     if dir.create_file(arg).is_none() {
@@ -427,8 +431,8 @@ impl Shell {
                     cwd.join(args[0])
                 };
                 let vfs = fs::get_vfs();
-                if let Some(file) = vfs.resolve_path(full_path) {
-                    match file.read() {
+                if let Some(node) = vfs.resolve_path(full_path) {
+                    match node.read() {
                         Some(data) => println!("{}", str::from_utf8(data).unwrap()),
                         None => println!("cat: {}: is a directory", path),
                     }
@@ -453,7 +457,7 @@ impl Shell {
                 } else {
                     cwd.join(args[0])
                 };
-                let vfs = fs::get_vfs();
+                let mut vfs = fs::get_vfs();
                 let target_path = match vfs.resolve_path(full_path) {
                     Some(node) => node.get_path().clone(),
                     None => {
