@@ -137,8 +137,9 @@ pub fn sys_get_cwd(buf: *mut u8, count: usize) -> *mut u8 {
 #[inline(always)]
 pub fn sys_exit(code: u64) -> ! {
     syscall!(SyscallId::Exit, code);
-    sys_yield();
-    unsafe { core::hint::unreachable_unchecked() }
+    loop {
+        sys_yield();
+    }
 }
 
 #[repr(C)]
@@ -294,6 +295,31 @@ pub fn sys_rename(oldpath: *const core::ffi::c_char, newpath: *const core::ffi::
 #[inline(always)]
 pub fn sys_clock_gettime(clock_id: u64, tp: *mut Timespec) -> i32 {
     syscall!(SyscallId::ClockGettime, clock_id, tp) as i32
+}
+
+#[inline(always)]
+pub fn sys_fork() -> i64 {
+    syscall!(SyscallId::Fork) as i64
+}
+
+#[inline(always)]
+pub fn sys_clone(flags: u64, child_stack: u64) -> i64 {
+    syscall!(SyscallId::Clone, flags, child_stack) as i64
+}
+
+#[inline(always)]
+pub fn sys_execve(path: *const core::ffi::c_char, argv: u64, envp: u64) -> i64 {
+    syscall!(SyscallId::Execve, path, argv, envp) as i64
+}
+
+#[inline(always)]
+pub fn sys_wait4(pid: i64, wstatus: *mut i32, options: u64, rusage: u64) -> i64 {
+    syscall!(SyscallId::Wait4, pid, wstatus, options, rusage) as i64
+}
+
+#[inline(always)]
+pub fn sys_waitpid(pid: i64, wstatus: *mut i32, options: u64) -> i64 {
+    sys_wait4(pid, wstatus, options, 0)
 }
 
 #[repr(u64)]

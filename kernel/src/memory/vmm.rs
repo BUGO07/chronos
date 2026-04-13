@@ -36,6 +36,7 @@ pub mod flag {
 pub static mut PAGEMAP: OnceCell<Arc<Spin<Pagemap>>> = OnceCell::new();
 
 unsafe impl Send for Pagemap {}
+unsafe impl Sync for Pagemap {}
 
 #[derive(Clone)]
 pub struct Pagemap {
@@ -95,6 +96,217 @@ impl Pagemap {
         Ok(())
     }
 
+    pub fn is_mapped(&self, virt: u64) -> bool {
+        let hhdm = get_hhdm_offset();
+
+        let pml4_entry = (virt & (0x1ff << 39)) >> 39;
+        let pml3_entry = (virt & (0x1ff << 30)) >> 30;
+        let pml2_entry = (virt & (0x1ff << 21)) >> 21;
+        let pml1_entry = (virt & (0x1ff << 12)) >> 12;
+
+        let pml4 = (self.top_level as u64 + hhdm) as *const u64;
+
+        unsafe {
+            let pml4e = *pml4.add(pml4_entry as usize);
+            if pml4e & flag::PRESENT == 0 {
+                return false;
+            }
+
+            let pml3 = ((pml4e & flag::PADDR_MASK) + hhdm) as *const u64;
+            let pml3e = *pml3.add(pml3_entry as usize);
+            if pml3e & flag::PRESENT == 0 {
+                return false;
+            }
+            if pml3e & flag::LPAGES != 0 {
+                return true;
+            }
+
+            let pml2 = ((pml3e & flag::PADDR_MASK) + hhdm) as *const u64;
+            let pml2e = *pml2.add(pml2_entry as usize);
+            if pml2e & flag::PRESENT == 0 {
+                return false;
+            }
+            if pml2e & flag::LPAGES != 0 {
+                return true;
+            }
+
+            let pml1 = ((pml2e & flag::PADDR_MASK) + hhdm) as *const u64;
+            let pml1e = *pml1.add(pml1_entry as usize);
+            pml1e & flag::PRESENT != 0
+        }
+    }
+
+    pub fn new_user() -> Pagemap {
+        let hhdm = get_hhdm_offset();
+        let new = Pagemap::new();
+        let kernel_pml4 = unsafe {
+            let kp = PAGEMAP.get().unwrap().lock();
+            (kp.top_level as u64 + hhdm) as *const u64
+        };
+        let new_pml4 = (new.top_level as u64 + hhdm) as *mut u64;
+        unsafe {
+            core::ptr::copy_nonoverlapping(kernel_pml4.add(256), new_pml4.add(256), 256);
+        }
+        new
+    }
+
+    pub fn clone_userspace(&self) -> Pagemap {
+        let hhdm = get_hhdm_offset();
+        let new = Pagemap::new_user();
+        let src_pml4 = (self.top_level as u64 + hhdm) as *const u64;
+        let dst_pml4 = (new.top_level as u64 + hhdm) as *mut u64;
+
+        for i4 in 0..256u64 {
+            let pml4e = unsafe { *src_pml4.add(i4 as usize) };
+            if pml4e & flag::PRESENT == 0 {
+                continue;
+            }
+
+            let src_pml3 = ((pml4e & flag::PADDR_MASK) + hhdm) as *const u64;
+            let new_pml3 = alloc_table();
+            unsafe {
+                *dst_pml4.add(i4 as usize) = (new_pml3 as u64) | (pml4e & !flag::PADDR_MASK);
+            }
+            let dst_pml3 = (new_pml3 as u64 + hhdm) as *mut u64;
+
+            for i3 in 0..512u64 {
+                let pml3e = unsafe { *src_pml3.add(i3 as usize) };
+                if pml3e & flag::PRESENT == 0 {
+                    continue;
+                }
+                if pml3e & flag::LPAGES != 0 {
+                    let old_phys = pml3e & flag::PADDR_MASK;
+                    let new_phys = alloc_pages(page_size::LARGE as usize);
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(
+                            (old_phys + hhdm) as *const u8,
+                            (new_phys + hhdm) as *mut u8,
+                            page_size::LARGE as usize,
+                        );
+                        *dst_pml3.add(i3 as usize) = new_phys | (pml3e & !flag::PADDR_MASK);
+                    }
+                    continue;
+                }
+
+                let src_pml2 = ((pml3e & flag::PADDR_MASK) + hhdm) as *const u64;
+                let new_pml2 = alloc_table();
+                unsafe {
+                    *dst_pml3.add(i3 as usize) = (new_pml2 as u64) | (pml3e & !flag::PADDR_MASK);
+                }
+                let dst_pml2 = (new_pml2 as u64 + hhdm) as *mut u64;
+
+                for i2 in 0..512u64 {
+                    let pml2e = unsafe { *src_pml2.add(i2 as usize) };
+                    if pml2e & flag::PRESENT == 0 {
+                        continue;
+                    }
+                    if pml2e & flag::LPAGES != 0 {
+                        let old_phys = pml2e & flag::PADDR_MASK;
+                        let new_phys = alloc_pages(page_size::MEDIUM as usize);
+                        unsafe {
+                            core::ptr::copy_nonoverlapping(
+                                (old_phys + hhdm) as *const u8,
+                                (new_phys + hhdm) as *mut u8,
+                                page_size::MEDIUM as usize,
+                            );
+                            *dst_pml2.add(i2 as usize) = new_phys | (pml2e & !flag::PADDR_MASK);
+                        }
+                        continue;
+                    }
+
+                    let src_pml1 = ((pml2e & flag::PADDR_MASK) + hhdm) as *const u64;
+                    let new_pml1 = alloc_table();
+                    unsafe {
+                        *dst_pml2.add(i2 as usize) =
+                            (new_pml1 as u64) | (pml2e & !flag::PADDR_MASK);
+                    }
+                    let dst_pml1 = (new_pml1 as u64 + hhdm) as *mut u64;
+
+                    for i1 in 0..512u64 {
+                        let pml1e = unsafe { *src_pml1.add(i1 as usize) };
+                        if pml1e & flag::PRESENT == 0 {
+                            continue;
+                        }
+                        let old_phys = pml1e & flag::PADDR_MASK;
+                        let new_phys = alloc_pages(page_size::SMALL as usize);
+                        unsafe {
+                            core::ptr::copy_nonoverlapping(
+                                (old_phys + hhdm) as *const u8,
+                                (new_phys + hhdm) as *mut u8,
+                                page_size::SMALL as usize,
+                            );
+                            *dst_pml1.add(i1 as usize) = new_phys | (pml1e & !flag::PADDR_MASK);
+                        }
+                    }
+                }
+            }
+        }
+
+        new
+    }
+
+    pub fn destroy_userspace(&mut self) {
+        let hhdm = get_hhdm_offset();
+        let pml4 = (self.top_level as u64 + hhdm) as *mut u64;
+
+        for i4 in 0..256u64 {
+            let pml4e = unsafe { *pml4.add(i4 as usize) };
+            if pml4e & flag::PRESENT == 0 {
+                continue;
+            }
+
+            let pml3 = ((pml4e & flag::PADDR_MASK) + hhdm) as *mut u64;
+
+            for i3 in 0..512u64 {
+                let pml3e = unsafe { *pml3.add(i3 as usize) };
+                if pml3e & flag::PRESENT == 0 {
+                    continue;
+                }
+                if pml3e & flag::LPAGES != 0 {
+                    free_pages(pml3e & flag::PADDR_MASK, page_size::LARGE as usize);
+                    continue;
+                }
+
+                let pml2 = ((pml3e & flag::PADDR_MASK) + hhdm) as *mut u64;
+
+                for i2 in 0..512u64 {
+                    let pml2e = unsafe { *pml2.add(i2 as usize) };
+                    if pml2e & flag::PRESENT == 0 {
+                        continue;
+                    }
+                    if pml2e & flag::LPAGES != 0 {
+                        free_pages(pml2e & flag::PADDR_MASK, page_size::MEDIUM as usize);
+                        continue;
+                    }
+
+                    let pml1 = ((pml2e & flag::PADDR_MASK) + hhdm) as *mut u64;
+
+                    for i1 in 0..512u64 {
+                        let pml1e = unsafe { *pml1.add(i1 as usize) };
+                        if pml1e & flag::PRESENT == 0 {
+                            continue;
+                        }
+                        free_pages(pml1e & flag::PADDR_MASK, page_size::SMALL as usize);
+                    }
+
+                    free_table(pml1);
+                }
+
+                free_table(pml2);
+            }
+
+            free_table(pml3);
+
+            unsafe {
+                *pml4.add(i4 as usize) = 0;
+            }
+        }
+    }
+
+    pub fn cr3(&self) -> u64 {
+        self.top_level as u64
+    }
+
     pub fn map_pages(
         &mut self,
         virt: u64,
@@ -142,6 +354,38 @@ fn alloc_table() -> *mut u64 {
             panic!("vmm: failed to allocate page table");
         }
         (ptr as u64 - get_hhdm_offset()) as _
+    }
+}
+
+fn alloc_pages(size: usize) -> u64 {
+    unsafe {
+        let ptr =
+            alloc::alloc::alloc_zeroed(Layout::from_size_align(size, size.min(0x1000)).unwrap());
+        if ptr.is_null() {
+            panic!("vmm: failed to allocate pages");
+        }
+        ptr as u64 - get_hhdm_offset()
+    }
+}
+
+fn free_pages(phys: u64, size: usize) {
+    let hhdm = get_hhdm_offset();
+    unsafe {
+        alloc::alloc::dealloc(
+            (phys + hhdm) as *mut u8,
+            Layout::from_size_align(size, size.min(0x1000)).unwrap(),
+        );
+    }
+}
+
+fn free_table(virt_ptr: *mut u64) {
+    let hhdm = get_hhdm_offset();
+    let phys = virt_ptr as u64 - hhdm;
+    unsafe {
+        alloc::alloc::dealloc(
+            (phys + hhdm) as *mut u8,
+            Layout::from_size_align(0x1000, 0x1000).unwrap(),
+        );
     }
 }
 

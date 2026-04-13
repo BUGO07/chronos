@@ -3,6 +3,7 @@
     Released under EUPL 1.2 License
 */
 
+use crate::utils::spinlock::Spin;
 use crate::{
     arch::drivers::{keyboard::KEYBOARD_STATE, time::preferred_timer_ms},
     drivers::fs::{Path, get_vfs},
@@ -12,7 +13,7 @@ use crate::{
     utils::shell::Shell,
     warn,
 };
-use alloc::{format, vec::Vec};
+use alloc::{format, sync::Arc, vec::Vec};
 use core::{
     panic::PanicInfo,
     sync::atomic::{AtomicU64, Ordering},
@@ -163,14 +164,11 @@ pub fn main_thread() -> ! {
         if let Some(bin) = vfs.resolve_path(Path::new("/bin/initramfs.elf"))
             && let Some(elf_data) = bin.read()
         {
-            let elf_proc_pid = scheduler::spawn_process(
-                unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() },
-                "test_elf",
-            );
+            let user_pagemap = Arc::new(Spin::new(crate::memory::vmm::Pagemap::new_user()));
+            let elf_proc_pid = scheduler::spawn_process(user_pagemap.clone(), "test_elf", 0);
             let elf_proc = scheduler::get_proc_by_pid(elf_proc_pid).unwrap();
             let entry = {
-                let pagemap_ref = unsafe { crate::memory::vmm::PAGEMAP.get().unwrap() };
-                let mut pagemap = pagemap_ref.lock();
+                let mut pagemap = user_pagemap.lock();
                 match crate::utils::elf::load_elf(elf_data, &mut pagemap) {
                     Ok(elf_info) => {
                         info!("loaded ELF binary, entry=0x{:X}", elf_info.entry);

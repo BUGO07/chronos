@@ -52,6 +52,7 @@ pub struct Thread {
     status: Status,
     pub runtime: u64,
     pub schedule_time: u64,
+    pub cr3: u64,
 }
 
 impl Debug for Thread {
@@ -148,6 +149,31 @@ impl Thread {
                 pstate: 0,
                 ..Default::default()
             },
+            cr3: proc.lock().pagemap.lock().cr3(),
+            parent: Arc::downgrade(proc),
+            status: Status::Ready,
+            runtime: 0,
+            schedule_time: 0,
+        }
+    }
+
+    pub fn new_from_regs(
+        proc: &Arc<Spin<Process>>,
+        name: &'static str,
+        regs: Registers,
+        kstack_alloc: u64,
+    ) -> Self {
+        let tid = proc.lock().next_tid();
+        Self {
+            name,
+            tid,
+            gtid: NEXT_GLOBAL_TID.fetch_add(1, Ordering::Relaxed),
+            kstack: kstack_alloc,
+            ustack: regs.rsp,
+            kstack_alloc,
+            ustack_alloc: 0,
+            regs,
+            cr3: proc.lock().pagemap.lock().cr3(),
             parent: Arc::downgrade(proc),
             status: Status::Ready,
             runtime: 0,

@@ -2,13 +2,14 @@
 #![no_main]
 #![allow(clippy::macro_metavars_in_unsafe)]
 
-use core::fmt::Write;
+use core::{ffi::c_char, fmt::Write};
 
 use crate::syscalls::{
-    LinuxDirent64, StatBuf, Timespec, UtsName, sys_access, sys_chdir, sys_clock_gettime,
-    sys_close, sys_dup, sys_dup2, sys_exit, sys_fstat, sys_ftruncate, sys_get_cwd, sys_getdents64,
-    sys_getpid, sys_getppid, sys_gettid, sys_lseek, sys_mkdir, sys_nanosleep, sys_open, sys_read,
-    sys_rename, sys_rmdir, sys_stat, sys_uname, sys_unlink, sys_write, sys_yield,
+    LinuxDirent64, StatBuf, Timespec, UtsName, sys_access, sys_chdir, sys_clock_gettime, sys_close,
+    sys_dup, sys_dup2, sys_execve, sys_exit, sys_fork, sys_fstat, sys_ftruncate, sys_get_cwd,
+    sys_getdents64, sys_getpid, sys_getppid, sys_gettid, sys_lseek, sys_mkdir, sys_nanosleep,
+    sys_open, sys_read, sys_rename, sys_rmdir, sys_stat, sys_uname, sys_unlink, sys_waitpid,
+    sys_write, sys_yield,
 };
 
 pub mod syscalls;
@@ -139,7 +140,7 @@ fn check(name: &str, ok: bool, detail: &str) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
+pub extern "C" fn _start(_argc: i32, _argv: *const *const c_char) -> ! {
     println!("=== syscall tests ===\n");
 
     test_getcwd();
@@ -169,6 +170,9 @@ pub extern "C" fn _start() -> ! {
     test_access();
     test_rename();
     test_clock_gettime();
+    test_fork();
+    test_fork_wait();
+    test_execve();
 
     let (passed, failed) = unsafe { (PASSED, FAILED) };
     println!("\n=== results: {} passed, {} failed ===", passed, failed);
@@ -479,7 +483,11 @@ fn test_yield() {
 fn test_getpid() {
     println!("[getpid/getppid]");
     let pid = sys_getpid();
-    check("getpid returns non-negative", pid < 0x8000_0000_0000_0000, "");
+    check(
+        "getpid returns non-negative",
+        pid < 0x8000_0000_0000_0000,
+        "",
+    );
     let ppid = sys_getppid();
     check("getppid returns 0 (no parent)", ppid == 0, "");
     let pid2 = sys_getpid();
@@ -495,17 +503,9 @@ fn test_uname() {
     if r == 0 {
         let uts = unsafe { buf.assume_init_ref() };
         let sysname = unsafe { core::ffi::CStr::from_ptr(uts.sysname.as_ptr() as _) };
-        check(
-            "sysname is Chronos",
-            sysname.to_str() == Ok("Chronos"),
-            "",
-        );
+        check("sysname is Chronos", sysname.to_str() == Ok("Chronos"), "");
         let machine = unsafe { core::ffi::CStr::from_ptr(uts.machine.as_ptr() as _) };
-        check(
-            "machine is x86_64",
-            machine.to_str() == Ok("x86_64"),
-            "",
-        );
+        check("machine is x86_64", machine.to_str() == Ok("x86_64"), "");
     }
 }
 
@@ -530,7 +530,11 @@ fn test_chdir() {
     let r2 = sys_chdir(c"/nonexistent".as_ptr() as _);
     check("ENOENT on bad chdir", r2 == -2, fmt_i32(r2));
 
-    sys_open(c"/tmp/chdir_test/f".as_ptr() as _, O_WRONLY | O_CREAT, 0o644);
+    sys_open(
+        c"/tmp/chdir_test/f".as_ptr() as _,
+        O_WRONLY | O_CREAT,
+        0o644,
+    );
     let r3 = sys_chdir(c"/tmp/chdir_test/f".as_ptr() as _);
     check("ENOTDIR chdir to file", r3 == -20, fmt_i32(r3));
 
@@ -545,14 +549,22 @@ fn test_stat() {
     check("stat / returns 0", r == 0, fmt_i32(r));
     if r == 0 {
         let s = unsafe { st.assume_init_ref() };
-        check("/ is a directory (mode)", s.st_mode & 0o170000 == 0o040000, "");
+        check(
+            "/ is a directory (mode)",
+            s.st_mode & 0o170000 == 0o040000,
+            "",
+        );
     }
 
     let r2 = sys_stat(c"/src/main.rs".as_ptr() as _, st.as_mut_ptr());
     check("stat /src/main.rs returns 0", r2 == 0, fmt_i32(r2));
     if r2 == 0 {
         let s = unsafe { st.assume_init_ref() };
-        check("main.rs is a file (mode)", s.st_mode & 0o170000 == 0o100000, "");
+        check(
+            "main.rs is a file (mode)",
+            s.st_mode & 0o170000 == 0o100000,
+            "",
+        );
         check("main.rs has size > 0", s.st_size > 0, "");
     }
 
@@ -573,7 +585,11 @@ fn test_fstat() {
     check("fstat returns 0", r == 0, fmt_i32(r));
     if r == 0 {
         let s = unsafe { st.assume_init_ref() };
-        check("fstat shows file type", s.st_mode & 0o170000 == 0o100000, "");
+        check(
+            "fstat shows file type",
+            s.st_mode & 0o170000 == 0o100000,
+            "",
+        );
         check("fstat shows size > 0", s.st_size > 0, "");
     }
     sys_close(fd);
@@ -584,7 +600,11 @@ fn test_fstat() {
 
 fn test_unlink() {
     println!("[unlink]");
-    let fd = sys_open(c"/tmp/unlink_me.txt".as_ptr() as _, O_WRONLY | O_CREAT, 0o644);
+    let fd = sys_open(
+        c"/tmp/unlink_me.txt".as_ptr() as _,
+        O_WRONLY | O_CREAT,
+        0o644,
+    );
     if fd >= 0 {
         sys_write(fd, b"bye".as_ptr(), 3);
         sys_close(fd);
@@ -736,11 +756,7 @@ fn test_getdents64() {
     }
     sys_mkdir(c"/tmp/dents_test/ccc".as_ptr() as _, 0o755);
 
-    let dir_fd = sys_open(
-        c"/tmp/dents_test".as_ptr() as _,
-        O_RDONLY | O_DIRECTORY,
-        0,
-    );
+    let dir_fd = sys_open(c"/tmp/dents_test".as_ptr() as _, O_RDONLY | O_DIRECTORY, 0);
     if dir_fd < 0 {
         check("open dir for getdents64", false, fmt_i32(dir_fd));
         return;
@@ -816,11 +832,7 @@ fn test_rename() {
     if fd2 >= 0 {
         let mut buf = [0u8; 16];
         let n = sys_read(fd2, buf.as_mut_ptr(), buf.len());
-        check(
-            "content preserved",
-            n == 9 && &buf[..9] == b"rename me",
-            "",
-        );
+        check("content preserved", n == 9 && &buf[..9] == b"rename me", "");
         sys_close(fd2);
     }
 
@@ -855,6 +867,55 @@ fn test_clock_gettime() {
 
     let r3 = sys_clock_gettime(99, &mut ts);
     check("EINVAL on bad clock_id", r3 == -22, fmt_i32(r3));
+}
+
+fn test_fork() {
+    println!("[fork]");
+    let pid = sys_fork();
+    if pid == 0 {
+        let my_pid = sys_getpid();
+        check("child gets new pid", my_pid > 0, "");
+        let ppid = sys_getppid();
+        check("child ppid != 0", ppid > 0, "");
+        sys_exit(0);
+    } else {
+        check("parent gets child pid", pid > 0, fmt_i64(pid));
+        let mut status: i32 = -1;
+        loop {
+            let waited = sys_waitpid(pid, &mut status, 0);
+            if waited == pid {
+                check("waitpid returns child pid", true, "");
+                break;
+            }
+            sys_yield();
+        }
+    }
+}
+
+fn test_fork_wait() {
+    println!("[fork+wait]");
+    let pid = sys_fork();
+    if pid == 0 {
+        sys_exit(42);
+    } else {
+        check("fork returned child pid", pid > 0, fmt_i64(pid));
+        let mut status: i32 = -1;
+        loop {
+            let r = sys_waitpid(pid, &mut status, 0);
+            if r == pid {
+                break;
+            }
+            sys_yield();
+        }
+        let exit_code = (status >> 8) & 0xff;
+        check("child exited with 42", exit_code == 42, "");
+    }
+}
+
+fn test_execve() {
+    println!("[execve]");
+    let r = sys_execve(c"/nonexistent".as_ptr(), 0, 0);
+    check("ENOENT on bad path", r == -2, fmt_i64(r));
 }
 
 fn fmt_i32(v: i32) -> &'static str {

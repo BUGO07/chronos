@@ -58,30 +58,34 @@ impl Default for Scheduler {
 pub struct Process {
     name: &'static str,
     pid: u64,
+    ppid: u64,
     next_tid: AtomicU64,
     next_stack_addr: u64,
     cwd: fs::Path,
-    pub fds: BTreeMap<i32, FileDescriptor>,
+    pub fdt: BTreeMap<i32, FileDescriptor>,
     pub next_fd: AtomicI32,
-    pub pagemap: &'static Arc<Spin<Pagemap>>,
+    pub pagemap: Arc<Spin<Pagemap>>,
     children: Vec<Arc<Spin<Thread>>>,
+    exit_status: Option<i32>,
 }
 
 unsafe impl Send for Process {}
 
 impl Process {
-    pub fn new(pagemap: &'static Arc<Spin<Pagemap>>, name: &'static str) -> Self {
+    pub fn new(pagemap: Arc<Spin<Pagemap>>, name: &'static str, ppid: u64) -> Self {
         let pid = next_pid();
         Self {
             name,
             pid,
+            ppid,
             next_tid: AtomicU64::new(1),
             next_stack_addr: 0x0000_7FFF_FF00_0000,
             cwd: fs::Path::new("/"),
-            fds: BTreeMap::new(),
-            next_fd: AtomicI32::new(3), // 0, 1, 2 are reserved for stdin, stdout, stderr
+            fdt: BTreeMap::new(),
+            next_fd: AtomicI32::new(3),
             pagemap,
             children: Vec::new(),
+            exit_status: None,
         }
     }
 
@@ -91,6 +95,22 @@ impl Process {
 
     pub fn get_pid(&self) -> u64 {
         self.pid
+    }
+
+    pub fn get_ppid(&self) -> u64 {
+        self.ppid
+    }
+
+    pub fn get_exit_status(&self) -> Option<i32> {
+        self.exit_status
+    }
+
+    pub fn set_exit_status(&mut self, status: i32) {
+        self.exit_status = Some(status);
+    }
+
+    pub fn get_pagemap(&self) -> &Arc<Spin<Pagemap>> {
+        &self.pagemap
     }
 
     pub fn get_children(&self) -> &[Arc<Spin<Thread>>] {
@@ -111,6 +131,10 @@ impl Process {
 
     pub fn next_tid(&mut self) -> u64 {
         self.next_tid.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub fn set_next_stack_addr(&mut self, addr: u64) {
+        self.next_stack_addr = addr;
     }
 
     pub fn next_stack_address(&mut self) -> u64 {
@@ -190,8 +214,23 @@ pub fn schedule(regs: &mut Registers) {
     }
 
     if let Some(ct) = scheduler.current.take() {
-        let status = ct.lock().get_status();
-        if status != Status::Terminated && status != Status::Blocked {
+        let t = ct.lock();
+        let status = t.get_status();
+        if status == Status::Terminated {
+            unsafe {
+                alloc::alloc::dealloc(
+                    t.kstack_alloc as _,
+                    Layout::from_size_align(KERNEL_STACK_SIZE, 16).unwrap(),
+                );
+                if t.ustack_alloc != 0 {
+                    alloc::alloc::dealloc(
+                        t.ustack_alloc as _,
+                        Layout::from_size_align(USER_STACK_SIZE, 16).unwrap(),
+                    );
+                }
+            }
+        } else if status != Status::Blocked {
+            drop(t);
             scheduler.queue.push_back(ct);
         }
     }
@@ -202,6 +241,20 @@ pub fn schedule(regs: &mut Registers) {
         t.set_status(Status::Running);
         *regs = t.regs;
         t.schedule_time = preferred_timer_ns();
+
+        let cr3 = t.cr3;
+        if cr3 != 0 {
+            unsafe { core::arch::asm!("mov cr3, {}", in(reg) cr3, options(nostack)) };
+        }
+
+        let gs_base = crate::arch::system::syscall::kernel_gs_base();
+        if gs_base != 0 {
+            unsafe {
+                let cpu_data = gs_base as *mut u64;
+                *cpu_data.add(2) = t.kstack + KERNEL_STACK_SIZE as u64;
+            }
+            crate::utils::asm::regs::wrmsr(0xC0000102, gs_base);
+        }
     }
 
     scheduler.current = Some(thread);
@@ -222,14 +275,19 @@ pub fn kill_process(pid: u64) -> bool {
     }
     without_ints(|| {
         let scheduler = get_scheduler();
-        if let Some(pos) = scheduler.processes.iter().position(|p| p.lock().pid == pid) {
-            let proc = scheduler.processes.get(pos).unwrap();
-
-            for thread in proc.lock().children.iter() {
+        if let Some(proc) = scheduler
+            .processes
+            .iter()
+            .find(|p| p.lock().pid == pid)
+            .cloned()
+        {
+            let mut lock = proc.lock();
+            for thread in lock.children.iter() {
                 thread.lock().set_status(Status::Terminated);
             }
-
-            scheduler.processes.remove(pos);
+            if lock.exit_status.is_none() {
+                lock.set_exit_status(0);
+            }
             true
         } else {
             false
@@ -237,13 +295,78 @@ pub fn kill_process(pid: u64) -> bool {
     })
 }
 
-pub fn spawn_process(pagemap: &'static Arc<Spin<Pagemap>>, name: &'static str) -> u64 {
+pub fn reap_process(pid: u64) {
     without_ints(|| {
         let scheduler = get_scheduler();
-        let proc = Arc::new(Spin::new(Process::new(pagemap, name)));
+        scheduler.processes.retain(|p| p.lock().pid != pid);
+    });
+}
+
+pub fn spawn_process(pagemap: Arc<Spin<Pagemap>>, name: &'static str, ppid: u64) -> u64 {
+    without_ints(|| {
+        let scheduler = get_scheduler();
+        let proc = Arc::new(Spin::new(Process::new(pagemap, name, ppid)));
         let pid = proc.lock().get_pid();
         scheduler.processes.push(proc);
         pid
+    })
+}
+
+pub fn fork_process(parent_regs: &Registers) -> u64 {
+    without_ints(|| {
+        let scheduler = get_scheduler();
+        let current = scheduler.current.as_ref().unwrap().clone();
+        let parent_proc = current.lock().get_parent().upgrade().unwrap();
+        let parent_lock = parent_proc.lock();
+
+        let parent_pid = parent_lock.get_pid();
+        let new_pagemap = Arc::new(Spin::new(parent_lock.pagemap.lock().clone_userspace()));
+
+        let child_pid = next_pid();
+        let mut child = Process {
+            name: parent_lock.name,
+            pid: child_pid,
+            ppid: parent_pid,
+            next_tid: AtomicU64::new(parent_lock.next_tid.load(Ordering::Relaxed)),
+            next_stack_addr: parent_lock.next_stack_addr,
+            cwd: parent_lock.cwd.clone(),
+            fdt: BTreeMap::new(),
+            next_fd: AtomicI32::new(parent_lock.next_fd.load(Ordering::Relaxed)),
+            pagemap: new_pagemap,
+            children: Vec::new(),
+            exit_status: None,
+        };
+
+        for (&fd_num, fd) in &parent_lock.fdt {
+            child.fdt.insert(fd_num, fd.dup());
+        }
+
+        drop(parent_lock);
+
+        let child_arc = Arc::new(Spin::new(child));
+
+        let mut child_regs = *parent_regs;
+        child_regs.rax = 0;
+
+        let kstack_ptr =
+            unsafe { alloc::alloc::alloc(Layout::from_size_align(KERNEL_STACK_SIZE, 16).unwrap()) };
+        assert!(!kstack_ptr.is_null(), "failed to allocate kernel stack");
+
+        let child_thread = Arc::new(Spin::new(Thread::new_from_regs(
+            &child_arc,
+            "main",
+            child_regs,
+            kstack_ptr as u64,
+        )));
+
+        child_arc
+            .lock()
+            .get_children_mut()
+            .push(child_thread.clone());
+        scheduler.processes.push(child_arc);
+        scheduler.queue.push_back(child_thread);
+
+        child_pid
     })
 }
 
@@ -252,8 +375,9 @@ pub fn init() {
     get_scheduler()
         .processes
         .push(Arc::new(Spin::new(Process::new(
-            unsafe { PAGEMAP.get().unwrap() },
+            unsafe { PAGEMAP.get().unwrap() }.clone(),
             "kernel",
+            0,
         ))));
 }
 

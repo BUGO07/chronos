@@ -2,6 +2,7 @@ core::arch::global_asm!(include_str!("syscall.S"));
 
 use core::{
     alloc::Layout,
+    ffi::c_char,
     sync::atomic::{AtomicPtr, Ordering},
 };
 
@@ -14,10 +15,13 @@ use crate::{
     },
     drivers::fs::{FileDescriptor, NodeMode, Path, Permissions, VfsNode, VfsNodeMetadataExt},
     info,
-    memory::KERNEL_STACK_SIZE,
+    memory::{KERNEL_STACK_SIZE, vmm::page_size},
     print,
     scheduler::current_process,
-    utils::asm::regs::{rdmsr, wrmsr},
+    utils::{
+        align_down,
+        asm::regs::{rdmsr, wrmsr},
+    },
 };
 
 pub mod id;
@@ -73,6 +77,12 @@ struct SyscallCpuData {
     kernel_rsp: u64,
 }
 
+static KERNEL_GS_PTR: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+pub fn kernel_gs_base() -> u64 {
+    KERNEL_GS_PTR.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 static HANDLERS: [AtomicPtr<()>; 333] = [const { AtomicPtr::new(sys_stub as _) }; 333];
 
 #[unsafe(no_mangle)]
@@ -101,12 +111,226 @@ fn sys_stub(regs: &mut Registers) {
 }
 
 fn sys_exit(regs: &mut Registers) {
-    let pid = crate::scheduler::current_process()
-        .unwrap()
-        .lock()
-        .get_pid();
-    info!("process {} exited with code {}", pid, regs.rdi);
+    let current = current_process().unwrap();
+    let mut lock = current.lock();
+    let pid = lock.get_pid();
+    lock.set_exit_status(regs.rdi as i32);
+    drop(lock);
+    info!("process {} exited with code {}", pid, regs.rdi as i32);
     crate::scheduler::kill_process(pid);
+    crate::scheduler::thread::yield_();
+}
+
+fn sys_fork(regs: &mut Registers) {
+    let child_pid = crate::scheduler::fork_process(regs);
+    regs.rax = child_pid;
+}
+
+const CLONE_VM: u64 = 0x00000100;
+// const CLONE_FS: u64 = 0x00000200;
+// const CLONE_FILES: u64 = 0x00000400;
+// const CLONE_SIGHAND: u64 = 0x00000800;
+// const CLONE_THREAD: u64 = 0x00010000;
+
+fn sys_clone(regs: &mut Registers) {
+    let flags = regs.rdi;
+    let child_stack = regs.rsi;
+
+    if flags & CLONE_VM != 0 {
+        let proc = current_process().unwrap();
+
+        let mut child_regs = *regs;
+        child_regs.rax = 0;
+        if child_stack != 0 {
+            child_regs.rsp = child_stack;
+        }
+
+        let kstack_ptr = unsafe {
+            alloc::alloc::alloc(
+                Layout::from_size_align(crate::memory::KERNEL_STACK_SIZE, 16).unwrap(),
+            )
+        };
+        assert!(!kstack_ptr.is_null(), "failed to allocate kernel stack");
+
+        let thread = alloc::sync::Arc::new(crate::utils::spinlock::Spin::new(
+            crate::scheduler::thread::Thread::new_from_regs(
+                &proc,
+                "clone",
+                child_regs,
+                kstack_ptr as u64,
+            ),
+        ));
+
+        let tid = thread.lock().tid;
+        proc.lock().get_children_mut().push(thread.clone());
+        crate::scheduler::enqueue(thread);
+        regs.rax = tid;
+    } else {
+        let child_pid = crate::scheduler::fork_process(regs);
+        regs.rax = child_pid;
+    }
+}
+
+fn sys_execve(regs: &mut Registers) {
+    let Some(path_str) = validate_user_cstr(regs.rdi) else {
+        regs.rax = -EFAULT as _;
+        return;
+    };
+
+    let current = current_process().unwrap();
+    let proc_lock = current.lock();
+    let path = resolve_path(path_str, proc_lock.get_cwd());
+    let pagemap = proc_lock.get_pagemap().clone();
+    drop(proc_lock);
+
+    let mut argv = regs.rsi as *const *const c_char;
+    let mut argc = 0;
+    let envp = regs.rdx;
+    unsafe {
+        if !argv.is_null()
+            && !pagemap
+                .lock()
+                .is_mapped(align_down(argv as _, page_size::SMALL))
+        {
+            regs.rax = -EFAULT as _;
+            return;
+        }
+        while !argv.is_null() && !(*argv).is_null() {
+            argc += 1;
+            argv = argv.add(1);
+        }
+    }
+
+    let vfs = crate::drivers::fs::get_vfs();
+    let Some(node) = vfs.resolve_path(path) else {
+        regs.rax = -ENOENT as _;
+        return;
+    };
+    let Some(elf_data) = node.read() else {
+        regs.rax = -EIO as _;
+        return;
+    };
+    let elf_data = elf_data.to_vec();
+    drop(vfs);
+
+    {
+        let mut pm = pagemap.lock();
+        // TODO: pm.destroy_userspace();
+
+        match crate::utils::elf::load_elf(&elf_data, &mut pm) {
+            Ok(elf_info) => {
+                let user_stack_alloc = unsafe {
+                    alloc::alloc::alloc(
+                        Layout::from_size_align(crate::memory::USER_STACK_SIZE, 16).unwrap(),
+                    )
+                };
+                assert!(!user_stack_alloc.is_null(), "failed to allocate user stack");
+
+                let phys = user_stack_alloc as u64 - crate::utils::limine::get_hhdm_offset();
+                let stack_vaddr = 0x0000_7FFF_FF00_0000u64 - crate::memory::USER_STACK_SIZE as u64;
+                for i in (0..crate::memory::USER_STACK_SIZE)
+                    .step_by(crate::memory::vmm::page_size::SMALL as usize)
+                {
+                    pm.map(
+                        stack_vaddr + i as u64,
+                        phys + i as u64,
+                        crate::memory::vmm::flag::RW | crate::memory::vmm::flag::USER,
+                        crate::memory::vmm::page_size::SMALL,
+                    )
+                    .unwrap();
+                }
+
+                regs.rip = elf_info.entry;
+                regs.rsp = stack_vaddr + crate::memory::USER_STACK_SIZE as u64;
+                regs.rflags = 0x202;
+                regs.rax = 0;
+                regs.rbx = 0;
+                regs.rcx = 0;
+                regs.rdi = argc;
+                regs.rsi = argv as _;
+                regs.rdx = envp;
+                regs.rbp = 0;
+                regs.r8 = 0;
+                regs.r9 = 0;
+                regs.r10 = 0;
+                regs.r11 = 0;
+                regs.r12 = 0;
+                regs.r13 = 0;
+                regs.r14 = 0;
+                regs.r15 = 0;
+
+                let mut proc_lock = current.lock();
+                proc_lock.set_next_stack_addr(stack_vaddr - crate::memory::USER_STACK_SIZE as u64);
+            }
+            Err(_e) => {
+                regs.rax = -ENOENT as _;
+            }
+        }
+    }
+}
+
+const WNOHANG: u64 = 1;
+
+fn sys_wait4(regs: &mut Registers) {
+    let pid = regs.rdi as i64;
+    let wstatus_ptr = regs.rsi;
+    let options = regs.rdx;
+
+    if wstatus_ptr != 0 && !validate_user_buf(wstatus_ptr, 4) {
+        regs.rax = -EFAULT as _;
+        return;
+    }
+
+    let current = current_process().unwrap();
+    let current_pid = current.lock().get_pid();
+
+    let find_exited_child = |target_pid: i64, parent_pid: u64| -> Option<(u64, i32)> {
+        let scheduler = crate::scheduler::get_scheduler();
+        scheduler
+            .processes
+            .iter()
+            .find(|p| {
+                let lock = p.lock();
+                lock.get_ppid() == parent_pid
+                    && lock.get_exit_status().is_some()
+                    && (target_pid == -1 || lock.get_pid() == target_pid as u64)
+            })
+            .map(|p| {
+                let lock = p.lock();
+                (lock.get_pid(), lock.get_exit_status().unwrap_or(0))
+            })
+    };
+
+    let has_any_children = || -> bool {
+        let scheduler = crate::scheduler::get_scheduler();
+        scheduler
+            .processes
+            .iter()
+            .any(|p| p.lock().get_ppid() == current_pid)
+    };
+
+    if pid != -1 && pid <= 0 {
+        regs.rax = -EINVAL as _;
+        return;
+    }
+
+    if let Some((child_pid, status)) = find_exited_child(pid, current_pid) {
+        if wstatus_ptr != 0 {
+            let wstatus = (status & 0xff) << 8;
+            unsafe {
+                *(wstatus_ptr as *mut i32) = wstatus;
+            }
+        }
+        crate::scheduler::reap_process(child_pid);
+        regs.rax = child_pid;
+    } else if options & WNOHANG != 0 {
+        regs.rax = 0;
+    } else if !has_any_children() {
+        regs.rax = (-10i64) as u64; // ECHILD
+    } else {
+        crate::scheduler::thread::yield_();
+        regs.rax = (-11i64) as u64; // EAGAIN
+    }
 }
 
 #[repr(C)]
@@ -118,7 +342,7 @@ struct Timespec {
 fn sys_nanosleep(regs: &mut Registers) {
     let req_ptr = regs.rdi;
 
-    if !validate_user_buf(req_ptr, core::mem::size_of::<Timespec>() as _) {
+    if !validate_user_buf(req_ptr, size_of::<Timespec>() as _) {
         regs.rax = -EFAULT as _;
         return;
     }
@@ -160,7 +384,7 @@ fn sys_read(regs: &mut Registers) {
 
     let current = current_process().unwrap();
     let mut lock = current.lock();
-    let Some(file) = lock.fds.get_mut(&(fd as i32)) else {
+    let Some(file) = lock.fdt.get_mut(&(fd as i32)) else {
         regs.rax = -EBADF as _;
         return;
     };
@@ -201,7 +425,7 @@ fn sys_write(regs: &mut Registers) {
     } else {
         let current = current_process().unwrap();
         let mut lock = current.lock();
-        let Some(file) = lock.fds.get_mut(&(fd as i32)) else {
+        let Some(file) = lock.fdt.get_mut(&(fd as i32)) else {
             regs.rax = -EBADF as _;
             return;
         };
@@ -326,7 +550,7 @@ fn sys_open(regs: &mut Registers) {
 
     let fd = proc.next_fd.fetch_add(1, Ordering::SeqCst);
 
-    proc.fds
+    proc.fdt
         .insert(fd, file.with_append(flags.contains(Flags::O_APPEND)));
 
     regs.rax = fd as _;
@@ -336,7 +560,7 @@ fn sys_close(regs: &mut Registers) {
     let current = current_process().unwrap();
     let mut lock = current.lock();
     let fd = regs.rdi as i32;
-    if lock.fds.remove(&fd).is_some() {
+    if lock.fdt.remove(&fd).is_some() {
         regs.rax = 0;
     } else {
         regs.rax = -EBADF as _;
@@ -353,7 +577,7 @@ fn sys_lseek(regs: &mut Registers) {
     let offset = regs.rsi as i64;
     let whence = regs.rdx;
 
-    let Some(file) = lock.fds.get_mut(&fd) else {
+    let Some(file) = lock.fdt.get_mut(&fd) else {
         regs.rax = -EBADF as _;
         return;
     };
@@ -432,7 +656,8 @@ fn sys_getpid(regs: &mut Registers) {
 }
 
 fn sys_getppid(regs: &mut Registers) {
-    regs.rax = 0;
+    let current = current_process().unwrap();
+    regs.rax = current.lock().get_ppid();
 }
 
 #[repr(C)]
@@ -453,7 +678,7 @@ fn fill_uts_field(field: &mut [u8; 65], value: &[u8]) {
 
 fn sys_uname(regs: &mut Registers) {
     let buf = regs.rdi;
-    if !validate_user_buf(buf, core::mem::size_of::<UtsName>() as _) {
+    if !validate_user_buf(buf, size_of::<UtsName>() as _) {
         regs.rax = -EFAULT as _;
         return;
     }
@@ -540,7 +765,7 @@ fn fill_stat(stat: &mut StatBuf, node: &dyn VfsNode) {
         st_rdev: 0,
         st_size: node.size() as i64,
         st_blksize: 4096,
-        st_blocks: ((node.size() + 511) / 512) as i64,
+        st_blocks: node.size().div_ceil(512) as i64,
         st_atime: meta.modified_at as i64,
         st_atime_nsec: 0,
         st_mtime: meta.modified_at as i64,
@@ -558,7 +783,7 @@ fn sys_stat(regs: &mut Registers) {
     };
 
     let stat_buf = regs.rsi;
-    if !validate_user_buf(stat_buf, core::mem::size_of::<StatBuf>() as _) {
+    if !validate_user_buf(stat_buf, size_of::<StatBuf>() as _) {
         regs.rax = -EFAULT as _;
         return;
     }
@@ -583,14 +808,14 @@ fn sys_fstat(regs: &mut Registers) {
     let fd = regs.rdi as i32;
     let stat_buf = regs.rsi;
 
-    if !validate_user_buf(stat_buf, core::mem::size_of::<StatBuf>() as _) {
+    if !validate_user_buf(stat_buf, size_of::<StatBuf>() as _) {
         regs.rax = -EFAULT as _;
         return;
     }
 
     let current = current_process().unwrap();
     let lock = current.lock();
-    let Some(file) = lock.fds.get(&fd) else {
+    let Some(file) = lock.fdt.get(&fd) else {
         regs.rax = -EBADF as _;
         return;
     };
@@ -679,14 +904,14 @@ fn sys_dup(regs: &mut Registers) {
     let current = current_process().unwrap();
     let mut proc = current.lock();
 
-    let Some(file) = proc.fds.get(&old_fd) else {
+    let Some(file) = proc.fdt.get(&old_fd) else {
         regs.rax = -EBADF as _;
         return;
     };
 
     let dup_fd = file.dup();
     let new_fd = proc.next_fd.fetch_add(1, Ordering::SeqCst);
-    proc.fds.insert(new_fd, dup_fd);
+    proc.fdt.insert(new_fd, dup_fd);
     regs.rax = new_fd as u64;
 }
 
@@ -697,7 +922,7 @@ fn sys_dup2(regs: &mut Registers) {
     let current = current_process().unwrap();
     let mut proc = current.lock();
 
-    if !proc.fds.contains_key(&old_fd) {
+    if !proc.fdt.contains_key(&old_fd) {
         regs.rax = -EBADF as _;
         return;
     }
@@ -707,10 +932,10 @@ fn sys_dup2(regs: &mut Registers) {
         return;
     }
 
-    let dup_fd = proc.fds.get(&old_fd).unwrap().dup();
+    let dup_fd = proc.fdt.get(&old_fd).unwrap().dup();
 
-    proc.fds.remove(&new_fd);
-    proc.fds.insert(new_fd, dup_fd);
+    proc.fdt.remove(&new_fd);
+    proc.fdt.insert(new_fd, dup_fd);
     regs.rax = new_fd as u64;
 }
 
@@ -725,7 +950,7 @@ fn sys_ftruncate(regs: &mut Registers) {
 
     let current = current_process().unwrap();
     let mut lock = current.lock();
-    let Some(file) = lock.fds.get_mut(&fd) else {
+    let Some(file) = lock.fdt.get_mut(&fd) else {
         regs.rax = -EBADF as _;
         return;
     };
@@ -767,7 +992,7 @@ fn sys_getdents64(regs: &mut Registers) {
 
     let current = current_process().unwrap();
     let mut lock = current.lock();
-    let Some(file) = lock.fds.get_mut(&fd) else {
+    let Some(file) = lock.fdt.get_mut(&fd) else {
         regs.rax = -EBADF as _;
         return;
     };
@@ -873,11 +1098,12 @@ fn sys_rename(regs: &mut Registers) {
         return;
     }
 
-    if let Some(existing) = vfs.resolve_path(new_path.clone()) {
-        if existing.is_dir() && !existing.get_children().is_empty() {
-            regs.rax = -ENOTEMPTY as _;
-            return;
-        }
+    if let Some(existing) = vfs.resolve_path(new_path.clone())
+        && existing.is_dir()
+        && !existing.get_children().is_empty()
+    {
+        regs.rax = -ENOTEMPTY as _;
+        return;
     }
 
     let old_name = old_path.get_name().to_string();
@@ -916,7 +1142,7 @@ fn sys_clock_gettime(regs: &mut Registers) {
     let clock_id = regs.rdi;
     let tp = regs.rsi;
 
-    if !validate_user_buf(tp, core::mem::size_of::<Timespec>() as _) {
+    if !validate_user_buf(tp, size_of::<Timespec>() as _) {
         regs.rax = -EFAULT as _;
         return;
     }
@@ -967,6 +1193,10 @@ pub fn init() {
     HANDLERS[SyscallId::Rename as usize].store(sys_rename as _, Ordering::Release);
     HANDLERS[SyscallId::Gettid as usize].store(sys_gettid as _, Ordering::Release);
     HANDLERS[SyscallId::ClockGettime as usize].store(sys_clock_gettime as _, Ordering::Release);
+    HANDLERS[SyscallId::Clone as usize].store(sys_clone as _, Ordering::Release);
+    HANDLERS[SyscallId::Fork as usize].store(sys_fork as _, Ordering::Release);
+    HANDLERS[SyscallId::Execve as usize].store(sys_execve as _, Ordering::Release);
+    HANDLERS[SyscallId::Wait4 as usize].store(sys_wait4 as _, Ordering::Release);
     HANDLERS[SyscallId::SchedYield as usize].store(sys_yield as _, Ordering::Release);
     HANDLERS[SyscallId::Nanosleep as usize].store(sys_nanosleep as _, Ordering::Release);
     HANDLERS[SyscallId::Exit as usize].store(sys_exit as _, Ordering::Release);
@@ -990,5 +1220,6 @@ pub fn init() {
         kernel_rsp: kernel_stack,
     }));
     // IA32_KERNEL_GS_BASE
+    KERNEL_GS_PTR.store(cpu_data as u64, core::sync::atomic::Ordering::Relaxed);
     wrmsr(0xC0000102, cpu_data as _);
 }
