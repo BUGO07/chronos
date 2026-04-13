@@ -25,7 +25,7 @@ bitflags::bitflags! {
         const RW = Self::READ.bits() | Self::WRITE.bits();
     }
 
-    #[derive(PartialEq, Debug)]
+    #[derive(PartialEq, Debug, Clone, Copy)]
     pub struct Permissions: i32 {
         const READ = 0b100;
         const WRITE = 0b010;

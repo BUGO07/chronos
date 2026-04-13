@@ -176,6 +176,126 @@ pub fn sys_yield() {
     syscall!(SyscallId::SchedYield);
 }
 
+#[inline(always)]
+pub fn sys_getpid() -> u64 {
+    syscall!(SyscallId::Getpid)
+}
+
+#[inline(always)]
+pub fn sys_getppid() -> u64 {
+    syscall!(SyscallId::Getppid)
+}
+
+#[repr(C)]
+pub struct UtsName {
+    pub sysname: [u8; 65],
+    pub nodename: [u8; 65],
+    pub release: [u8; 65],
+    pub version: [u8; 65],
+    pub machine: [u8; 65],
+    pub domainname: [u8; 65],
+}
+
+#[inline(always)]
+pub fn sys_uname(buf: *mut UtsName) -> i32 {
+    syscall!(SyscallId::Uname, buf) as i32
+}
+
+#[inline(always)]
+pub fn sys_chdir(path: *const core::ffi::c_char) -> i32 {
+    syscall!(SyscallId::Chdir, path) as i32
+}
+
+#[repr(C)]
+pub struct StatBuf {
+    pub st_dev: u64,
+    pub st_ino: u64,
+    pub st_nlink: u64,
+    pub st_mode: u32,
+    pub st_uid: u32,
+    pub st_gid: u32,
+    pub __pad0: u32,
+    pub st_rdev: u64,
+    pub st_size: i64,
+    pub st_blksize: i64,
+    pub st_blocks: i64,
+    pub st_atime: i64,
+    pub st_atime_nsec: i64,
+    pub st_mtime: i64,
+    pub st_mtime_nsec: i64,
+    pub st_ctime: i64,
+    pub st_ctime_nsec: i64,
+    pub __unused: [i64; 3],
+}
+
+#[inline(always)]
+pub fn sys_stat(path: *const core::ffi::c_char, buf: *mut StatBuf) -> i32 {
+    syscall!(SyscallId::Stat, path, buf) as i32
+}
+
+#[inline(always)]
+pub fn sys_fstat(fd: i32, buf: *mut StatBuf) -> i32 {
+    syscall!(SyscallId::Fstat, fd, buf) as i32
+}
+
+#[inline(always)]
+pub fn sys_unlink(path: *const core::ffi::c_char) -> i32 {
+    syscall!(SyscallId::Unlink, path) as i32
+}
+
+#[inline(always)]
+pub fn sys_rmdir(path: *const core::ffi::c_char) -> i32 {
+    syscall!(SyscallId::Rmdir, path) as i32
+}
+
+#[inline(always)]
+pub fn sys_dup(fd: i32) -> i32 {
+    syscall!(SyscallId::Dup, fd) as i32
+}
+
+#[inline(always)]
+pub fn sys_dup2(old_fd: i32, new_fd: i32) -> i32 {
+    syscall!(SyscallId::Dup2, old_fd, new_fd) as i32
+}
+
+#[inline(always)]
+pub fn sys_ftruncate(fd: i32, length: i64) -> i32 {
+    syscall!(SyscallId::Ftruncate, fd, length) as i32
+}
+
+#[repr(C)]
+pub struct LinuxDirent64 {
+    pub d_ino: u64,
+    pub d_off: i64,
+    pub d_reclen: u16,
+    pub d_type: u8,
+}
+
+#[inline(always)]
+pub fn sys_getdents64(fd: i32, buf: *mut u8, count: usize) -> isize {
+    syscall!(SyscallId::Getdents64, fd, buf, count) as isize
+}
+
+#[inline(always)]
+pub fn sys_gettid() -> u64 {
+    syscall!(SyscallId::Gettid)
+}
+
+#[inline(always)]
+pub fn sys_access(path: *const core::ffi::c_char, _mode: i32) -> i32 {
+    syscall!(SyscallId::Access, path, _mode) as i32
+}
+
+#[inline(always)]
+pub fn sys_rename(oldpath: *const core::ffi::c_char, newpath: *const core::ffi::c_char) -> i32 {
+    syscall!(SyscallId::Rename, oldpath, newpath) as i32
+}
+
+#[inline(always)]
+pub fn sys_clock_gettime(clock_id: u64, tp: *mut Timespec) -> i32 {
+    syscall!(SyscallId::ClockGettime, clock_id, tp) as i32
+}
+
 #[repr(u64)]
 pub enum SyscallId {
     Read,

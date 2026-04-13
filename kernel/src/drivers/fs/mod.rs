@@ -80,6 +80,14 @@ impl FileDescriptor {
     pub fn node_mut(&mut self) -> &mut dyn VfsNode {
         unsafe { &mut *self.node }
     }
+    pub fn dup(&self) -> FileDescriptor {
+        FileDescriptor {
+            node: self.node,
+            permissions: self.permissions,
+            offset: self.offset,
+            append: self.append,
+        }
+    }
     pub fn read(&mut self, buf: &mut [u8]) -> Option<usize> {
         let offset = self.offset;
         self.node_mut().read_at(offset, buf).inspect(|&n| {
@@ -121,6 +129,9 @@ pub trait VfsNode: core::fmt::Debug {
     fn create_dir(&mut self, name: &str) -> Option<&mut Box<dyn VfsNode>>; // folder-only
     fn create_file(&mut self, name: &str) -> Option<&mut Box<dyn VfsNode>>; // folder-only
     fn remove_child(&mut self, name: &str) -> bool; // folder-only
+    fn take_child(&mut self, name: &str) -> Option<Box<dyn VfsNode>>; // folder-only
+    fn add_child(&mut self, child: Box<dyn VfsNode>) -> bool; // folder-only
+    fn set_path(&mut self, path: Path);
 
     // File-only ops. Directories implement these as no-ops / None.
     fn size(&self) -> u64;
@@ -270,6 +281,22 @@ impl VfsNode for Directory {
         }
         removed
     }
+    fn take_child(&mut self, name: &str) -> Option<Box<dyn VfsNode>> {
+        let pos = self.children.iter().position(|c| c.get_name() == name)?;
+        self.metadata.modified_at = read_rtc().to_epoch().unwrap_or_default();
+        Some(self.children.remove(pos))
+    }
+    fn add_child(&mut self, child: Box<dyn VfsNode>) -> bool {
+        if self.children.iter().any(|c| c.get_name() == child.get_name()) {
+            return false;
+        }
+        self.metadata.modified_at = read_rtc().to_epoch().unwrap_or_default();
+        self.children.push(child);
+        true
+    }
+    fn set_path(&mut self, path: Path) {
+        self.path = path;
+    }
     fn size(&self) -> u64 {
         self.metadata.size
     }
@@ -342,6 +369,15 @@ impl VfsNode for File {
     }
     fn remove_child(&mut self, _name: &str) -> bool {
         false
+    }
+    fn take_child(&mut self, _name: &str) -> Option<Box<dyn VfsNode>> {
+        None
+    }
+    fn add_child(&mut self, _child: Box<dyn VfsNode>) -> bool {
+        false
+    }
+    fn set_path(&mut self, path: Path) {
+        self.path = path;
     }
     fn size(&self) -> u64 {
         self.metadata.size

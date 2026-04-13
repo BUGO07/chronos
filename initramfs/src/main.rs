@@ -5,8 +5,10 @@
 use core::fmt::Write;
 
 use crate::syscalls::{
-    Timespec, sys_close, sys_exit, sys_get_cwd, sys_lseek, sys_mkdir, sys_nanosleep, sys_open,
-    sys_read, sys_write, sys_yield,
+    LinuxDirent64, StatBuf, Timespec, UtsName, sys_access, sys_chdir, sys_clock_gettime,
+    sys_close, sys_dup, sys_dup2, sys_exit, sys_fstat, sys_ftruncate, sys_get_cwd, sys_getdents64,
+    sys_getpid, sys_getppid, sys_gettid, sys_lseek, sys_mkdir, sys_nanosleep, sys_open, sys_read,
+    sys_rename, sys_rmdir, sys_stat, sys_uname, sys_unlink, sys_write, sys_yield,
 };
 
 pub mod syscalls;
@@ -152,6 +154,21 @@ pub extern "C" fn _start() -> ! {
     test_relative_paths();
     test_nanosleep();
     test_yield();
+    test_getpid();
+    test_uname();
+    test_chdir();
+    test_stat();
+    test_fstat();
+    test_unlink();
+    test_rmdir();
+    test_dup();
+    test_dup2();
+    test_ftruncate();
+    test_getdents64();
+    test_gettid();
+    test_access();
+    test_rename();
+    test_clock_gettime();
 
     let (passed, failed) = unsafe { (PASSED, FAILED) };
     println!("\n=== results: {} passed, {} failed ===", passed, failed);
@@ -459,15 +476,400 @@ fn test_yield() {
     check("yield returns", true, "");
 }
 
+fn test_getpid() {
+    println!("[getpid/getppid]");
+    let pid = sys_getpid();
+    check("getpid returns non-negative", pid < 0x8000_0000_0000_0000, "");
+    let ppid = sys_getppid();
+    check("getppid returns 0 (no parent)", ppid == 0, "");
+    let pid2 = sys_getpid();
+    check("getpid is stable", pid == pid2, "");
+}
+
+fn test_uname() {
+    println!("[uname]");
+    let mut buf = core::mem::MaybeUninit::<UtsName>::uninit();
+    let r = sys_uname(buf.as_mut_ptr());
+    check("uname returns 0", r == 0, fmt_i32(r));
+
+    if r == 0 {
+        let uts = unsafe { buf.assume_init_ref() };
+        let sysname = unsafe { core::ffi::CStr::from_ptr(uts.sysname.as_ptr() as _) };
+        check(
+            "sysname is Chronos",
+            sysname.to_str() == Ok("Chronos"),
+            "",
+        );
+        let machine = unsafe { core::ffi::CStr::from_ptr(uts.machine.as_ptr() as _) };
+        check(
+            "machine is x86_64",
+            machine.to_str() == Ok("x86_64"),
+            "",
+        );
+    }
+}
+
+fn test_chdir() {
+    println!("[chdir]");
+    sys_mkdir(c"/tmp/chdir_test".as_ptr() as _, 0o755);
+
+    let r = sys_chdir(c"/tmp/chdir_test".as_ptr() as _);
+    check("chdir to /tmp/chdir_test", r == 0, fmt_i32(r));
+
+    let buf = [0u8; 256];
+    let ptr = sys_get_cwd(buf.as_ptr() as _, buf.len());
+    if (ptr as isize) > 0 {
+        let cwd = unsafe { core::ffi::CStr::from_ptr(ptr as *const core::ffi::c_char) };
+        check(
+            "cwd is /tmp/chdir_test",
+            cwd.to_str() == Ok("/tmp/chdir_test"),
+            cwd.to_str().unwrap_or("?"),
+        );
+    }
+
+    let r2 = sys_chdir(c"/nonexistent".as_ptr() as _);
+    check("ENOENT on bad chdir", r2 == -2, fmt_i32(r2));
+
+    sys_open(c"/tmp/chdir_test/f".as_ptr() as _, O_WRONLY | O_CREAT, 0o644);
+    let r3 = sys_chdir(c"/tmp/chdir_test/f".as_ptr() as _);
+    check("ENOTDIR chdir to file", r3 == -20, fmt_i32(r3));
+
+    sys_chdir(c"/".as_ptr() as _);
+}
+
+fn test_stat() {
+    println!("[stat]");
+    let mut st = core::mem::MaybeUninit::<StatBuf>::uninit();
+
+    let r = sys_stat(c"/".as_ptr() as _, st.as_mut_ptr());
+    check("stat / returns 0", r == 0, fmt_i32(r));
+    if r == 0 {
+        let s = unsafe { st.assume_init_ref() };
+        check("/ is a directory (mode)", s.st_mode & 0o170000 == 0o040000, "");
+    }
+
+    let r2 = sys_stat(c"/src/main.rs".as_ptr() as _, st.as_mut_ptr());
+    check("stat /src/main.rs returns 0", r2 == 0, fmt_i32(r2));
+    if r2 == 0 {
+        let s = unsafe { st.assume_init_ref() };
+        check("main.rs is a file (mode)", s.st_mode & 0o170000 == 0o100000, "");
+        check("main.rs has size > 0", s.st_size > 0, "");
+    }
+
+    let r3 = sys_stat(c"/nonexistent".as_ptr() as _, st.as_mut_ptr());
+    check("ENOENT on missing path", r3 == -2, fmt_i32(r3));
+}
+
+fn test_fstat() {
+    println!("[fstat]");
+    let fd = sys_open(c"/src/main.rs".as_ptr() as _, O_RDONLY, 0);
+    if fd < 0 {
+        check("open for fstat", false, fmt_i32(fd));
+        return;
+    }
+
+    let mut st = core::mem::MaybeUninit::<StatBuf>::uninit();
+    let r = sys_fstat(fd, st.as_mut_ptr());
+    check("fstat returns 0", r == 0, fmt_i32(r));
+    if r == 0 {
+        let s = unsafe { st.assume_init_ref() };
+        check("fstat shows file type", s.st_mode & 0o170000 == 0o100000, "");
+        check("fstat shows size > 0", s.st_size > 0, "");
+    }
+    sys_close(fd);
+
+    let r2 = sys_fstat(999, st.as_mut_ptr());
+    check("EBADF on bad fd", r2 == -9, fmt_i32(r2));
+}
+
+fn test_unlink() {
+    println!("[unlink]");
+    let fd = sys_open(c"/tmp/unlink_me.txt".as_ptr() as _, O_WRONLY | O_CREAT, 0o644);
+    if fd >= 0 {
+        sys_write(fd, b"bye".as_ptr(), 3);
+        sys_close(fd);
+    }
+
+    let r = sys_unlink(c"/tmp/unlink_me.txt".as_ptr() as _);
+    check("unlink file", r == 0, fmt_i32(r));
+
+    let fd2 = sys_open(c"/tmp/unlink_me.txt".as_ptr() as _, O_RDONLY, 0);
+    check("file is gone after unlink", fd2 == -2, fmt_i32(fd2));
+
+    let r2 = sys_unlink(c"/tmp/unlink_me.txt".as_ptr() as _);
+    check("ENOENT on already unlinked", r2 == -2, fmt_i32(r2));
+
+    sys_mkdir(c"/tmp/unlink_dir".as_ptr() as _, 0o755);
+    let r3 = sys_unlink(c"/tmp/unlink_dir".as_ptr() as _);
+    check("EISDIR unlinking dir", r3 == -21, fmt_i32(r3));
+    sys_rmdir(c"/tmp/unlink_dir".as_ptr() as _); // cleanup
+}
+
+fn test_rmdir() {
+    println!("[rmdir]");
+    sys_mkdir(c"/tmp/rmdir_test".as_ptr() as _, 0o755);
+    let r = sys_rmdir(c"/tmp/rmdir_test".as_ptr() as _);
+    check("rmdir empty dir", r == 0, fmt_i32(r));
+
+    let r2 = sys_rmdir(c"/tmp/rmdir_test".as_ptr() as _);
+    check("ENOENT on removed dir", r2 == -2, fmt_i32(r2));
+
+    sys_mkdir(c"/tmp/rmdir_full".as_ptr() as _, 0o755);
+    let fd = sys_open(
+        c"/tmp/rmdir_full/file.txt".as_ptr() as _,
+        O_WRONLY | O_CREAT,
+        0o644,
+    );
+    if fd >= 0 {
+        sys_close(fd);
+    }
+    let r3 = sys_rmdir(c"/tmp/rmdir_full".as_ptr() as _);
+    check("ENOTEMPTY on non-empty", r3 == -39, fmt_i32(r3));
+
+    sys_unlink(c"/tmp/rmdir_full/file.txt".as_ptr() as _);
+    sys_rmdir(c"/tmp/rmdir_full".as_ptr() as _);
+}
+
+fn test_dup() {
+    println!("[dup]");
+    let fd = sys_open(c"/src/main.rs".as_ptr() as _, O_RDONLY, 0);
+    if fd < 0 {
+        check("open for dup", false, fmt_i32(fd));
+        return;
+    }
+
+    let fd2 = sys_dup(fd);
+    check("dup returns new fd", fd2 >= 3 && fd2 != fd, fmt_i32(fd2));
+
+    let mut buf1 = [0u8; 8];
+    let mut buf2 = [0u8; 8];
+    let n1 = sys_read(fd, buf1.as_mut_ptr(), buf1.len());
+    let n2 = sys_read(fd2, buf2.as_mut_ptr(), buf2.len());
+    check("read from original fd", n1 > 0, fmt_isize(n1));
+    check("read from dup'd fd", n2 > 0, fmt_isize(n2));
+
+    sys_close(fd);
+    sys_close(fd2);
+
+    let r = sys_dup(999);
+    check("EBADF dup bad fd", r == -9, fmt_i32(r));
+}
+
+fn test_dup2() {
+    println!("[dup2]");
+    let fd = sys_open(c"/src/main.rs".as_ptr() as _, O_RDONLY, 0);
+    if fd < 0 {
+        check("open for dup2", false, fmt_i32(fd));
+        return;
+    }
+
+    let target = 100;
+    let r = sys_dup2(fd, target);
+    check("dup2 to fd 100", r == target, fmt_i32(r));
+
+    let mut buf = [0u8; 8];
+    let n = sys_read(target, buf.as_mut_ptr(), buf.len());
+    check("read from dup2'd fd", n > 0, fmt_isize(n));
+
+    let r2 = sys_dup2(fd, fd);
+    check("dup2 same fd returns fd", r2 == fd, fmt_i32(r2));
+
+    sys_close(fd);
+    sys_close(target);
+
+    let r3 = sys_dup2(999, 101);
+    check("EBADF dup2 bad fd", r3 == -9, fmt_i32(r3));
+}
+
+fn test_ftruncate() {
+    println!("[ftruncate]");
+    let fd = sys_open(
+        c"/tmp/trunc_test.txt".as_ptr() as _,
+        O_RDWR | O_CREAT | O_TRUNC,
+        0o644,
+    );
+    if fd < 0 {
+        check("open for ftruncate", false, fmt_i32(fd));
+        return;
+    }
+
+    sys_write(fd, b"hello world".as_ptr(), 11);
+
+    let r = sys_ftruncate(fd, 5);
+    check("ftruncate to 5", r == 0, fmt_i32(r));
+
+    let mut st = core::mem::MaybeUninit::<StatBuf>::uninit();
+    sys_fstat(fd, st.as_mut_ptr());
+    let s = unsafe { st.assume_init_ref() };
+    check("size is 5 after truncate", s.st_size == 5, "");
+
+    let r2 = sys_ftruncate(fd, 20);
+    check("ftruncate extend to 20", r2 == 0, fmt_i32(r2));
+    sys_fstat(fd, st.as_mut_ptr());
+    let s = unsafe { st.assume_init_ref() };
+    check("size is 20 after extend", s.st_size == 20, "");
+
+    sys_close(fd);
+
+    let r3 = sys_ftruncate(999, 0);
+    check("EBADF on bad fd", r3 == -9, fmt_i32(r3));
+}
+
+fn test_getdents64() {
+    println!("[getdents64]");
+    sys_mkdir(c"/tmp/dents_test".as_ptr() as _, 0o755);
+    let fd1 = sys_open(
+        c"/tmp/dents_test/aaa".as_ptr() as _,
+        O_WRONLY | O_CREAT,
+        0o644,
+    );
+    if fd1 >= 0 {
+        sys_close(fd1);
+    }
+    let fd2 = sys_open(
+        c"/tmp/dents_test/bbb".as_ptr() as _,
+        O_WRONLY | O_CREAT,
+        0o644,
+    );
+    if fd2 >= 0 {
+        sys_close(fd2);
+    }
+    sys_mkdir(c"/tmp/dents_test/ccc".as_ptr() as _, 0o755);
+
+    let dir_fd = sys_open(
+        c"/tmp/dents_test".as_ptr() as _,
+        O_RDONLY | O_DIRECTORY,
+        0,
+    );
+    if dir_fd < 0 {
+        check("open dir for getdents64", false, fmt_i32(dir_fd));
+        return;
+    }
+
+    let mut buf = [0u8; 1024];
+    let n = sys_getdents64(dir_fd, buf.as_mut_ptr(), buf.len());
+    check("getdents64 returns bytes > 0", n > 0, fmt_isize(n));
+
+    let mut count = 0u32;
+    let mut offset = 0usize;
+    while offset < n as usize {
+        let entry = unsafe { &*(buf.as_ptr().add(offset) as *const LinuxDirent64) };
+        count += 1;
+        offset += entry.d_reclen as usize;
+    }
+    check("found 3 entries", count == 3, "");
+
+    let n2 = sys_getdents64(dir_fd, buf.as_mut_ptr(), buf.len());
+    check("second call returns 0", n2 == 0, fmt_isize(n2));
+
+    sys_close(dir_fd);
+
+    sys_unlink(c"/tmp/dents_test/aaa".as_ptr() as _);
+    sys_unlink(c"/tmp/dents_test/bbb".as_ptr() as _);
+    sys_rmdir(c"/tmp/dents_test/ccc".as_ptr() as _);
+    sys_rmdir(c"/tmp/dents_test".as_ptr() as _);
+}
+
+fn test_gettid() {
+    println!("[gettid]");
+    let tid = sys_gettid();
+    check("gettid returns > 0", tid > 0, "");
+    let tid2 = sys_gettid();
+    check("gettid is stable", tid == tid2, "");
+}
+
+fn test_access() {
+    println!("[access]");
+    let r = sys_access(c"/src/main.rs".as_ptr() as _, 0);
+    check("access existing file", r == 0, fmt_i32(r));
+
+    let r2 = sys_access(c"/".as_ptr() as _, 0);
+    check("access root dir", r2 == 0, fmt_i32(r2));
+
+    let r3 = sys_access(c"/nonexistent".as_ptr() as _, 0);
+    check("ENOENT on missing", r3 == -2, fmt_i32(r3));
+}
+
+fn test_rename() {
+    println!("[rename]");
+    let fd = sys_open(
+        c"/tmp/rename_src.txt".as_ptr() as _,
+        O_WRONLY | O_CREAT,
+        0o644,
+    );
+    if fd >= 0 {
+        sys_write(fd, b"rename me".as_ptr(), 9);
+        sys_close(fd);
+    }
+
+    let r = sys_rename(
+        c"/tmp/rename_src.txt".as_ptr() as _,
+        c"/tmp/rename_dst.txt".as_ptr() as _,
+    );
+    check("rename file", r == 0, fmt_i32(r));
+
+    let r2 = sys_access(c"/tmp/rename_src.txt".as_ptr() as _, 0);
+    check("old name gone", r2 == -2, fmt_i32(r2));
+
+    let fd2 = sys_open(c"/tmp/rename_dst.txt".as_ptr() as _, O_RDONLY, 0);
+    check("new name exists", fd2 >= 3, fmt_i32(fd2));
+    if fd2 >= 0 {
+        let mut buf = [0u8; 16];
+        let n = sys_read(fd2, buf.as_mut_ptr(), buf.len());
+        check(
+            "content preserved",
+            n == 9 && &buf[..9] == b"rename me",
+            "",
+        );
+        sys_close(fd2);
+    }
+
+    let r3 = sys_rename(
+        c"/tmp/nonexistent".as_ptr() as _,
+        c"/tmp/whatever".as_ptr() as _,
+    );
+    check("ENOENT on missing source", r3 == -2, fmt_i32(r3));
+
+    sys_unlink(c"/tmp/rename_dst.txt".as_ptr() as _);
+}
+
+fn test_clock_gettime() {
+    println!("[clock_gettime]");
+    let mut ts = Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+
+    let r = sys_clock_gettime(0, &mut ts);
+    check("CLOCK_REALTIME returns 0", r == 0, fmt_i32(r));
+    check("realtime sec > 0", ts.tv_sec > 0, "");
+
+    let r2 = sys_clock_gettime(1, &mut ts);
+    check("CLOCK_MONOTONIC returns 0", r2 == 0, fmt_i32(r2));
+    check("monotonic sec >= 0", ts.tv_sec >= 0, "");
+
+    let ns_before = ts.tv_sec * 1_000_000_000 + ts.tv_nsec;
+    sys_clock_gettime(1, &mut ts);
+    let ns_after = ts.tv_sec * 1_000_000_000 + ts.tv_nsec;
+    check("monotonic advances", ns_after >= ns_before, "");
+
+    let r3 = sys_clock_gettime(99, &mut ts);
+    check("EINVAL on bad clock_id", r3 == -22, fmt_i32(r3));
+}
+
 fn fmt_i32(v: i32) -> &'static str {
     match v {
         -2 => "ENOENT (-2)",
         -5 => "EIO (-5)",
         -9 => "EBADF (-9)",
+        -14 => "EFAULT (-14)",
         -17 => "EEXIST (-17)",
+        -20 => "ENOTDIR (-20)",
+        -21 => "EISDIR (-21)",
         -22 => "EINVAL (-22)",
         -34 => "ERANGE (-34)",
         -38 => "ENOSYS (-38)",
+        -39 => "ENOTEMPTY (-39)",
         _ => "unexpected value",
     }
 }
